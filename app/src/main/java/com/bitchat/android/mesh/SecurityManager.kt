@@ -237,10 +237,10 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
      */
     private fun verifyPacketSignature(packet: BitchatPacket, peerID: String): Boolean {
         try {
-            // only verify ANNOUNCE, MESSAGE, and FILE_TRANSFER
+            // only verify ANNOUNCE and FILE_TRANSFER (MESSAGE skipped due to cross-platform
+            // zlib compression non-determinism — see BITCHAT_PATCHES.md Patch 1)
             if (MessageType.fromValue(packet.type) !in setOf(
                     MessageType.ANNOUNCE,
-                    MessageType.MESSAGE,
                     MessageType.FILE_TRANSFER
                 )) {
                 return true
