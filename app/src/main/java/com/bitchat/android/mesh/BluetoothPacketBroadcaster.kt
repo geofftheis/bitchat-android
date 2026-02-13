@@ -485,12 +485,14 @@ class BluetoothPacketBroadcaster(
                 result
             } ?: false
         } catch (e: Exception) {
+            // Log the error but do NOT remove the subscribed device or address mapping.
+            // A single failed notification (e.g. oversized gossip packet) does not mean
+            // the BLE connection is dead. Removing the subscription permanently kills the
+            // server→client notification path with no way to recover, and removing the
+            // addressPeerMap entry also cripples the client write path's peer attribution.
+            // If the connection is truly gone, periodic cleanup will handle it.
+            // See BITCHAT_PATCHES.md Patch 4.
             Log.w(TAG, "Error sending to server connection ${device.address}: ${e.message}")
-            connectionScope.launch {
-                delay(CLEANUP_DELAY)
-                connectionTracker.removeSubscribedDevice(device)
-                connectionTracker.addressPeerMap.remove(device.address)
-            }
             false
         }
     }
