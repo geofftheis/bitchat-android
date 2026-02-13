@@ -617,6 +617,19 @@ class BluetoothMeshService(private val context: Context) {
     }
     
     /**
+     * Clear accumulated session state (duplicate detection, fragment buffers) without
+     * shutting down the service.  Called at the start of each new session so that
+     * stale message IDs from a previous game cannot cause packets to be silently
+     * dropped as duplicates and incomplete fragment buffers cannot interfere with
+     * reassembly of new messages.
+     */
+    fun clearSessionState() {
+        Log.i(TAG, "Clearing session state (processedMessages, fragments)")
+        securityManager.clearAllData()
+        fragmentManager.clearAllFragments()
+    }
+
+    /**
      * Start the mesh service
      */
     fun startServices() {
@@ -630,12 +643,15 @@ class BluetoothMeshService(private val context: Context) {
             Log.e(TAG, "Mesh service instance was terminated; create a new instance instead of restarting")
             return
         }
-        
+
         Log.i(TAG, "Starting Bluetooth mesh service with peer ID: $myPeerID")
-        
+
+        // Clear stale session state so a reused instance starts clean
+        clearSessionState()
+
         if (connectionManager.startServices()) {
             isActive = true
-            
+
             // Start periodic announcements for peer discovery and connectivity
             sendPeriodicBroadcastAnnounce()
             Log.d(TAG, "Started periodic broadcast announcements (every 30 seconds)")
@@ -655,17 +671,21 @@ class BluetoothMeshService(private val context: Context) {
             Log.w(TAG, "Mesh service not active, ignoring stop request")
             return
         }
-        
+
         Log.i(TAG, "Stopping Bluetooth mesh service")
         isActive = false
-        
+
         // Send leave announcement
         sendLeaveAnnouncement()
-        
+
+        // Immediately clear session state so that if a new game starts before the
+        // async cleanup below finishes, the reused instance won't have stale data.
+        clearSessionState()
+
         serviceScope.launch {
             Log.d(TAG, "Stopping subcomponents and cancelling scope...")
             delay(200) // Give leave message time to send
-            
+
             // Stop all components
             gossipSyncManager.stop()
             Log.d(TAG, "GossipSyncManager stopped")
@@ -677,7 +697,7 @@ class BluetoothMeshService(private val context: Context) {
             storeForwardManager.shutdown()
             messageHandler.shutdown()
             packetProcessor.shutdown()
-            
+
             // Mark this instance as terminated and cancel its scope so it won't be reused
             terminated = true
             serviceScope.cancel()
