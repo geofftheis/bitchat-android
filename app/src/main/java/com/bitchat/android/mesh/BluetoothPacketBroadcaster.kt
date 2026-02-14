@@ -511,11 +511,9 @@ class BluetoothPacketBroadcaster(
                 result
             } ?: false
         } catch (e: Exception) {
+            // Log the error but do NOT clean up the device connection.
+            // Same rationale as notifyDevice() — see BITCHAT_PATCHES.md Patch 4.
             Log.w(TAG, "Error sending to client connection ${deviceConn.device.address}: ${e.message}")
-            connectionScope.launch {
-                delay(CLEANUP_DELAY)
-                connectionTracker.cleanupDeviceConnection(deviceConn.device.address)
-            }
             false
         }
     }
