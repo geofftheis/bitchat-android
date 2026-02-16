@@ -237,7 +237,7 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
      * Check if duty cycling should be used
      */
     fun shouldUseDutyCycle(): Boolean {
-        return currentMode != PowerMode.PERFORMANCE
+        return false  // Half-Wit: disable duty cycling for continuous scanning — see BITCHAT_PATCHES.md Patch 5
     }
     
     /**
