@@ -33,24 +33,10 @@ object MessagePadding {
      * Add PKCS#7-style padding to reach target size - FIXED: proper PKCS#7 (iOS compatible)
      */
     fun pad(data: ByteArray, targetSize: Int): ByteArray {
-        if (data.size >= targetSize) return data
-        
-        val paddingNeeded = targetSize - data.size
-        
-        // Constrain to 255 to fit a single-byte pad length marker
-        if (paddingNeeded <= 0 || paddingNeeded > 255) return data
-        
-        val result = ByteArray(targetSize)
-        
-        // Copy original data
-        System.arraycopy(data, 0, result, 0, data.size)
-        
-        // PKCS#7: All pad bytes are equal to the pad length (iOS fix)
-        for (i in data.size until targetSize) {
-            result[i] = paddingNeeded.toByte()
-        }
-        
-        return result
+        // Half-Wit Patch 7: Disable message padding for all packet types.
+        // Padding obscures message length for traffic analysis resistance,
+        // which is unnecessary for a local 8-player game.
+        return data
     }
     
     /**
