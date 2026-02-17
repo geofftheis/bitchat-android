@@ -655,9 +655,11 @@ class BluetoothMeshService(private val context: Context) {
             // Start periodic announcements for peer discovery and connectivity
             sendPeriodicBroadcastAnnounce()
             Log.d(TAG, "Started periodic broadcast announcements (every 30 seconds)")
-            // Start periodic syncs
-            gossipSyncManager.start()
-            Log.d(TAG, "GossipSyncManager started")
+            // Half-Wit Patch 8: GossipSync disabled — the app-level retry loops provide
+            // sufficient reliability, and gossip sync floods the BLE radio with thousands
+            // of sync packets that cause L2CAP congestion and game message drops.
+            // gossipSyncManager.start()
+            Log.d(TAG, "GossipSyncManager NOT started (Half-Wit Patch 8)")
         } else {
             Log.e(TAG, "Failed to start Bluetooth services")
         }
