@@ -15,27 +15,28 @@ class BluetoothPermissionManager(private val context: Context) {
      */
     fun hasBluetoothPermissions(): Boolean {
         val permissions = mutableListOf<String>()
-        
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            // Android 12+: BLE scanning uses BLUETOOTH_SCAN with neverForLocation,
+            // so location permissions are not needed.
+            // Half-Wit Patch 10 — see BITCHAT_PATCHES.md
             permissions.addAll(listOf(
                 Manifest.permission.BLUETOOTH_ADVERTISE,
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.BLUETOOTH_SCAN
             ))
         } else {
+            // Android 11 and below: location required for BLE scanning
             permissions.addAll(listOf(
                 Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN
+                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION
             ))
         }
-        
-        permissions.addAll(listOf(
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ))
 
-        return permissions.all { 
-            ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED 
+        return permissions.all {
+            ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 }
