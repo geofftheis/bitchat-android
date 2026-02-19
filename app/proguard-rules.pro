@@ -3,6 +3,9 @@
 # proguardFiles setting in build.gradle.
 -keep class com.bitchat.android.protocol.** { *; }
 -keep class com.bitchat.android.crypto.** { *; }
+-keep class com.bitchat.android.service.** { *; }
+-keep class com.bitchat.android.mesh.** { *; }
+-keep class com.bitchat.android.model.** { *; }
 -dontwarn org.bouncycastle.**
 -keep class org.bouncycastle.** { *; }
 
