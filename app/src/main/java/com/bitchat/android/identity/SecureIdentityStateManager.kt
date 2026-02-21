@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.security.KeyStore
 import java.security.MessageDigest
 import android.util.Base64
 import android.util.Log
@@ -38,13 +39,52 @@ class SecureIdentityStateManager(private val context: Context) {
     private val lock = Any()
     
     init {
-        // Create master key for encryption
+        prefs = try {
+            createEncryptedPrefs()
+        } catch (e: Exception) {
+            // AEADBadTagException (or other crypto exceptions) means the Android
+            // Keystore master key is corrupted / out of sync with the encrypted
+            // prefs file.  Recovery: delete the prefs file, remove the master key
+            // from the Keystore, and retry.  (See BITCHAT_PATCHES.md Patch 12)
+            Log.w(TAG, "⚠️ EncryptedSharedPreferences corrupted, resetting: ${e.message}")
+
+            // 1. Delete the corrupted prefs file
+            try {
+                val prefsFile = java.io.File(
+                    context.applicationInfo.dataDir + "/shared_prefs/${PREFS_NAME}.xml"
+                )
+                if (prefsFile.exists()) {
+                    prefsFile.delete()
+                    Log.d(TAG, "🗑️ Deleted corrupted identity prefs file")
+                }
+            } catch (deleteEx: Exception) {
+                Log.e(TAG, "❌ Failed to delete corrupted identity prefs file: ${deleteEx.message}")
+            }
+
+            // 2. Remove the master key from the Android Keystore
+            try {
+                val keyStore = KeyStore.getInstance("AndroidKeyStore")
+                keyStore.load(null)
+                if (keyStore.containsAlias(MasterKey.DEFAULT_MASTER_KEY_ALIAS)) {
+                    keyStore.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+                    Log.d(TAG, "🗑️ Deleted corrupted master key from Keystore")
+                }
+            } catch (ksEx: Exception) {
+                Log.e(TAG, "❌ Failed to delete master key from Keystore: ${ksEx.message}")
+            }
+
+            // 3. Retry — this will create a fresh master key and prefs file
+            Log.d(TAG, "✅ EncryptedSharedPreferences recreated after reset")
+            createEncryptedPrefs()
+        }
+    }
+
+    private fun createEncryptedPrefs(): SharedPreferences {
         val masterKey = MasterKey.Builder(context, MasterKey.DEFAULT_MASTER_KEY_ALIAS)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        
-        // Create encrypted shared preferences
-        prefs = EncryptedSharedPreferences.create(
+
+        return EncryptedSharedPreferences.create(
             context,
             PREFS_NAME,
             masterKey,
