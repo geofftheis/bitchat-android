@@ -44,22 +44,18 @@ class SecureIdentityStateManager(private val context: Context) {
         } catch (e: Exception) {
             // AEADBadTagException (or other crypto exceptions) means the Android
             // Keystore master key is corrupted / out of sync with the encrypted
-            // prefs file.  Recovery: delete the prefs file, remove the master key
-            // from the Keystore, and retry.  (See BITCHAT_PATCHES.md Patch 12)
+            // prefs file.  Recovery: delete ALL prefs files that share the master
+            // key, remove the master key from the Keystore, and retry.
+            // (See BITCHAT_PATCHES.md Patch 14)
             Log.w(TAG, "⚠️ EncryptedSharedPreferences corrupted, resetting: ${e.message}")
 
-            // 1. Delete the corrupted prefs file
-            try {
-                val prefsFile = java.io.File(
-                    context.applicationInfo.dataDir + "/shared_prefs/${PREFS_NAME}.xml"
-                )
-                if (prefsFile.exists()) {
-                    prefsFile.delete()
-                    Log.d(TAG, "🗑️ Deleted corrupted identity prefs file")
-                }
-            } catch (deleteEx: Exception) {
-                Log.e(TAG, "❌ Failed to delete corrupted identity prefs file: ${deleteEx.message}")
-            }
+            // 1. Delete ALL encrypted prefs files that share the same master key.
+            //    Both SecureIdentityStateManager ("bitchat_identity") and
+            //    EncryptionService ("bitchat_crypto_secure") use
+            //    MasterKey.DEFAULT_MASTER_KEY_ALIAS. Deleting the master key
+            //    invalidates both, so we must delete both prefs files.
+            deletePrefsFiles(PREFS_NAME)
+            deletePrefsFiles("bitchat_crypto_secure")
 
             // 2. Remove the master key from the Android Keystore
             try {
@@ -73,9 +69,34 @@ class SecureIdentityStateManager(private val context: Context) {
                 Log.e(TAG, "❌ Failed to delete master key from Keystore: ${ksEx.message}")
             }
 
-            // 3. Retry — this will create a fresh master key and prefs file
-            Log.d(TAG, "✅ EncryptedSharedPreferences recreated after reset")
-            createEncryptedPrefs()
+            // 3. Retry — wrapped in try-catch: if the Keystore is fundamentally
+            //    broken, fall back to unencrypted SharedPreferences so the app
+            //    doesn't crash.
+            try {
+                val result = createEncryptedPrefs()
+                Log.d(TAG, "✅ EncryptedSharedPreferences recreated after reset")
+                result
+            } catch (retryEx: Exception) {
+                Log.e(TAG, "❌ Retry failed, falling back to unencrypted prefs: ${retryEx.message}")
+                context.getSharedPreferences(PREFS_NAME + "_fallback", Context.MODE_PRIVATE)
+            }
+        }
+    }
+
+    private fun deletePrefsFiles(prefsName: String) {
+        try {
+            val sharedPrefsDir = java.io.File(
+                context.applicationInfo.dataDir, "shared_prefs"
+            )
+            for (suffix in listOf(".xml", ".xml.bak")) {
+                val file = java.io.File(sharedPrefsDir, "$prefsName$suffix")
+                if (file.exists()) {
+                    file.delete()
+                    Log.d(TAG, "🗑️ Deleted $prefsName$suffix")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to delete prefs files for $prefsName: ${e.message}")
         }
     }
 
