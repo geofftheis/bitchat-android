@@ -117,12 +117,12 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                     if (file != null) {
                         Log.d(TAG, "🔓 Decrypted encrypted file from $peerID: name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}'")
                         val uniqueMsgId = java.util.UUID.randomUUID().toString().uppercase()
-                        val savedPath = com.bitchat.android.features.file.FileUtils.saveIncomingFile(appContext, file)
+                        val savedPath = saveIncomingFile(file)
                         val message = BitchatMessage(
                             id = uniqueMsgId,
                             sender = delegate?.getPeerNickname(peerID) ?: "Unknown",
                             content = savedPath,
-                            type = com.bitchat.android.features.file.FileUtils.messageTypeForMime(file.mimeType),
+                            type = messageTypeForMime(file.mimeType),
                             timestamp = java.util.Date(packet.timestamp.toLong()),
                             isRelay = false,
                             isPrivate = true,
@@ -398,12 +398,12 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                 if (isFileTransfer) {
                     Log.d(TAG, "📥 FILE_TRANSFER decode success (broadcast): name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}', from=${peerID.take(8)}")
                 }
-                val savedPath = com.bitchat.android.features.file.FileUtils.saveIncomingFile(appContext, file)
+                val savedPath = saveIncomingFile(file)
                 val message = BitchatMessage(
                     id = java.util.UUID.randomUUID().toString().uppercase(),
                     sender = delegate?.getPeerNickname(peerID) ?: "unknown",
                     content = savedPath,
-                    type = com.bitchat.android.features.file.FileUtils.messageTypeForMime(file.mimeType),
+                    type = messageTypeForMime(file.mimeType),
                     senderPeerID = peerID,
                     timestamp = Date(packet.timestamp.toLong())
                 )
@@ -445,12 +445,12 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
                 if (isFileTransfer) {
                     Log.d(TAG, "📥 FILE_TRANSFER decode success (private): name='${file.fileName}', size=${file.fileSize}, mime='${file.mimeType}', from=${peerID.take(8)}")
                 }
-                val savedPath = com.bitchat.android.features.file.FileUtils.saveIncomingFile(appContext, file)
+                val savedPath = saveIncomingFile(file)
                 val message = BitchatMessage(
                     id = java.util.UUID.randomUUID().toString().uppercase(),
                     sender = delegate?.getPeerNickname(peerID) ?: "unknown",
                     content = savedPath,
-                    type = com.bitchat.android.features.file.FileUtils.messageTypeForMime(file.mimeType),
+                    type = messageTypeForMime(file.mimeType),
                     senderPeerID = peerID,
                     timestamp = Date(packet.timestamp.toLong()),
                     isPrivate = true,
@@ -531,6 +531,30 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     }
 
     /**
+     * Save incoming file data to the app cache directory.
+     * Inline replacement for features/file/FileUtils.saveIncomingFile (deleted in Patch 16).
+     */
+    private fun saveIncomingFile(file: com.bitchat.android.model.BitchatFilePacket): String {
+        val cacheDir = java.io.File(appContext.cacheDir, "received_files")
+        cacheDir.mkdirs()
+        val outFile = java.io.File(cacheDir, file.fileName)
+        outFile.writeBytes(file.content)
+        return outFile.absolutePath
+    }
+
+    /**
+     * Map a MIME type to BitchatMessageType.
+     * Inline replacement for features/file/FileUtils.messageTypeForMime (deleted in Patch 16).
+     */
+    private fun messageTypeForMime(mimeType: String): BitchatMessageType {
+        return when {
+            mimeType.startsWith("audio/") -> BitchatMessageType.Audio
+            mimeType.startsWith("image/") -> BitchatMessageType.Image
+            else -> BitchatMessageType.File
+        }
+    }
+
+    /**
      * Shutdown the handler
      */
     fun shutdown() {
@@ -540,46 +564,21 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     /**
      * Handle favorite/unfavorite notification received over mesh as a private message.
      * Content format: "[FAVORITED]:npub..." or "[UNFAVORITED]:npub..."
+     * Note: FavoritesPersistenceService removed in Patch 16 (favorites/ deleted).
+     * Only emit a system-level message so the user sees the event.
      */
     private fun handleFavoriteNotificationFromMesh(content: String, fromPeerID: String) {
         try {
             val isFavorite = content.startsWith("[FAVORITED]")
-            val npub = content.substringAfter(":", "").trim().takeIf { it.startsWith("npub1") }
-
-            // Update mutual favorite status in persistence
-            // Resolve full Noise key if available via delegate peer info
-            val peerInfo = delegate?.getPeerInfo(fromPeerID)
-            val noiseKey = peerInfo?.noisePublicKey
-            if (noiseKey != null) {
-                com.bitchat.android.favorites.FavoritesPersistenceService.shared.updatePeerFavoritedUs(noiseKey, isFavorite)
-                if (npub != null) {
-                    // Index by noise key and current mesh peerID for fast Nostr routing
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKey(noiseKey, npub)
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKeyForPeerID(fromPeerID, npub)
-                }
-
-                // Determine iOS-style guidance text
-                val rel = com.bitchat.android.favorites.FavoritesPersistenceService.shared.getFavoriteStatus(noiseKey)
-                val guidance = if (isFavorite) {
-                    if (rel?.isFavorite == true) {
-                        " — mutual! You can continue DMs via Nostr when out of mesh."
-                    } else {
-                        " — favorite back to continue DMs later."
-                    }
-                } else {
-                    ". DMs over Nostr will pause unless you both favorite again."
-                }
-
-                // Emit system message via delegate callback
-                val action = if (isFavorite) "favorited" else "unfavorited"
-                val sys = com.bitchat.android.model.BitchatMessage(
-                    sender = "system",
-                    content = "${peerInfo.nickname} $action you$guidance",
-                    timestamp = java.util.Date(),
-                    isRelay = false
-                )
-                delegate?.onMessageReceived(sys)
-            }
+            val peerInfo = delegate?.getPeerInfo(fromPeerID) ?: return
+            val action = if (isFavorite) "favorited" else "unfavorited"
+            val sys = com.bitchat.android.model.BitchatMessage(
+                sender = "system",
+                content = "${peerInfo.nickname} $action you.",
+                timestamp = java.util.Date(),
+                isRelay = false
+            )
+            delegate?.onMessageReceived(sys)
         } catch (_: Exception) {
             // Best-effort; ignore errors
         }

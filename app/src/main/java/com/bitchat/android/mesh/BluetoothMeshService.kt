@@ -35,7 +35,7 @@ import kotlin.random.Random
  * - PacketProcessor: Incoming packet routing
  */
 class BluetoothMeshService(private val context: Context) {
-    private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
+    // debugManager removed (ui/ deleted in Patch 16); debug logging calls below replaced with no-ops
     
     companion object {
         private const val TAG = "BluetoothMeshService"
@@ -55,12 +55,7 @@ class BluetoothMeshService(private val context: Context) {
     internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
     private lateinit var gossipSyncManager: GossipSyncManager
-    // Service-level notification manager for background (no-UI) DMs
-    private val serviceNotificationManager = com.bitchat.android.ui.NotificationManager(
-        context.applicationContext,
-        androidx.core.app.NotificationManagerCompat.from(context.applicationContext),
-        com.bitchat.android.util.NotificationIntervalManager()
-    )
+    // serviceNotificationManager removed (ui/ deleted in Patch 16); Half-Wit has its own notification handling
     
     // Service state management
     private var isActive = false
@@ -85,17 +80,9 @@ class BluetoothMeshService(private val context: Context) {
             myPeerID = myPeerID,
             scope = serviceScope,
             configProvider = object : GossipSyncManager.ConfigProvider {
-                override fun seenCapacity(): Int = try {
-                    com.bitchat.android.ui.debug.DebugPreferenceManager.getSeenPacketCapacity(500)
-                } catch (_: Exception) { 500 }
-
-                override fun gcsMaxBytes(): Int = try {
-                    com.bitchat.android.ui.debug.DebugPreferenceManager.getGcsMaxFilterBytes(400)
-                } catch (_: Exception) { 400 }
-
-                override fun gcsTargetFpr(): Double = try {
-                    com.bitchat.android.ui.debug.DebugPreferenceManager.getGcsFprPercent(1.0) / 100.0
-                } catch (_: Exception) { 0.01 }
+                override fun seenCapacity(): Int = 500
+                override fun gcsMaxBytes(): Int = 400
+                override fun gcsTargetFpr(): Double = 0.01
             }
         )
 
@@ -165,11 +152,10 @@ class BluetoothMeshService(private val context: Context) {
      */
     private fun setupDelegates() {
         Log.d(TAG, "Setting up component delegates")
-        // Provide nickname resolver to BLE broadcaster and debug manager
+        // Provide nickname resolver to BLE broadcaster
         try {
             val resolver: (String) -> String? = { pid -> peerManager.getPeerNickname(pid) }
             connectionManager.setNicknameResolver(resolver)
-            debugManager?.setNicknameResolver(resolver)
         } catch (_: Exception) { }
         // PeerManager delegates to main mesh service delegate
         peerManager.delegate = object : PeerManagerDelegate {
@@ -365,12 +351,7 @@ class BluetoothMeshService(private val context: Context) {
                 // Store fingerprint for the peer via centralized fingerprint manager
                 val fingerprint = peerManager.storeFingerprintForPeer(newPeerID, publicKey)
 
-                // Index existing Nostr mapping by the new peerID if we have it
-                try {
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.findNostrPubkey(publicKey)?.let { npub ->
-                        com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKeyForPeerID(newPeerID, npub)
-                    }
-                } catch (_: Exception) { }
+                // Nostr/favorites mapping removed (Patch 16)
                 
                 // If there was a previous peer ID, remove it to avoid duplicates
                 previousPeerID?.let { oldPeerID ->
@@ -408,13 +389,7 @@ class BluetoothMeshService(private val context: Context) {
                 // If no UI delegate attached (app closed), show DM notification via service manager
                 if (delegate == null && message.isPrivate) {
                     try {
-                        val senderPeerID = message.senderPeerID
-                        if (senderPeerID != null) {
-                            val nick = try { peerManager.getPeerNickname(senderPeerID) } catch (_: Exception) { null } ?: senderPeerID
-                            val preview = com.bitchat.android.ui.NotificationTextUtils.buildPrivateMessagePreview(message)
-                            serviceNotificationManager.setAppBackgroundState(true)
-                            serviceNotificationManager.showPrivateMessageNotification(senderPeerID, nick, preview)
-                        }
+                        // Background notification removed (ui/ deleted in Patch 16); Half-Wit handles its own notifications
                     } catch (_: Exception) { }
                 }
             }
@@ -556,16 +531,7 @@ class BluetoothMeshService(private val context: Context) {
         // BluetoothConnectionManager delegates
         connectionManager.delegate = object : BluetoothConnectionManagerDelegate {
         override fun onPacketReceived(packet: BitchatPacket, peerID: String, device: android.bluetooth.BluetoothDevice?) {
-            // Log incoming for debug graphs (do not double-count anywhere else)
-            try {
-                com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().logIncoming(
-                    packet = packet,
-                    fromPeerID = peerID,
-                    fromNickname = null,
-                    fromDeviceAddress = device?.address,
-                    myPeerID = myPeerID
-                )
-            } catch (_: Exception) { }
+            // Debug packet logging removed (ui/ deleted in Patch 16)
             packetProcessor.processPacket(RoutedPacket(packet, peerID, device?.address))
         }
             
@@ -576,14 +542,7 @@ class BluetoothMeshService(private val context: Context) {
                     delay(200)
                     sendBroadcastAnnounce()
                 }
-                // Verbose debug: device connected
-                try {
-                    val addr = device.address
-                    val peer = connectionManager.addressPeerMap[addr]
-                    val nick = peer?.let { peerManager.getPeerNickname(it) } ?: "unknown"
-                    com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
-                        .logPeerConnection(peer ?: "unknown", nick, addr, isInbound = !connectionManager.isClientConnection(addr)!!)
-                } catch (_: Exception) { }
+                // Debug peer connection logging removed (ui/ deleted in Patch 16)
             }
 
             override fun onDeviceDisconnected(device: android.bluetooth.BluetoothDevice) {
@@ -597,14 +556,7 @@ class BluetoothMeshService(private val context: Context) {
                 // refresh peer list on disconnect. 
                 try { peerManager.refreshPeerList() } catch (_: Exception) { }
 
-                if (peer != null) {
-                    // Verbose debug: device disconnected
-                    try {
-                        val nick = peerManager.getPeerNickname(peer) ?: "unknown"
-                        com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
-                            .logPeerDisconnection(peer, nick, addr)
-                    } catch (_: Exception) { }
-                }
+                // Debug peer disconnection logging removed (ui/ deleted in Patch 16)
             }
             
             override fun onRSSIUpdated(deviceAddress: String, rssi: Int) {
@@ -941,16 +893,7 @@ class BluetoothMeshService(private val context: Context) {
         serviceScope.launch {
             Log.d(TAG, "📖 Sending read receipt for message $messageID to $recipientPeerID")
 
-            // Route geohash read receipts via MessageRouter instead of here
-            val geo = runCatching { com.bitchat.android.services.MessageRouter.tryGetInstance() }.getOrNull()
-            val isGeoAlias = try {
-                val map = com.bitchat.android.nostr.GeohashAliasRegistry.snapshot()
-                map.containsKey(recipientPeerID)
-            } catch (_: Exception) { false }
-            if (isGeoAlias && geo != null) {
-                geo.sendReadReceipt(com.bitchat.android.model.ReadReceipt(messageID), recipientPeerID)
-                return@launch
-            }
+            // Geohash read receipt routing removed (nostr/ deleted in Patch 16)
 
             try {
                 // Avoid duplicate read receipts: check persistent store first
@@ -1045,7 +988,7 @@ class BluetoothMeshService(private val context: Context) {
     fun sendBroadcastAnnounce() {
         Log.d(TAG, "Sending broadcast announce")
         serviceScope.launch {
-            val nickname = try { com.bitchat.android.services.NicknameProvider.getNickname(context, myPeerID) } catch (_: Exception) { myPeerID }
+            val nickname = myPeerID // NicknameProvider removed (ui/ deleted in Patch 16); consuming app sets nickname directly
             
             // Get the static public key for the announcement
             val staticKey = encryptionService.getStaticPublicKey()
@@ -1108,7 +1051,7 @@ class BluetoothMeshService(private val context: Context) {
     fun sendAnnouncementToPeer(peerID: String) {
         if (peerManager.hasAnnouncedToPeer(peerID)) return
         
-        val nickname = try { com.bitchat.android.services.NicknameProvider.getNickname(context, myPeerID) } catch (_: Exception) { myPeerID }
+        val nickname = myPeerID // NicknameProvider removed (ui/ deleted in Patch 16); consuming app sets nickname directly
         
         // Get the static public key for the announcement
         val staticKey = encryptionService.getStaticPublicKey()

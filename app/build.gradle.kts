@@ -75,21 +75,6 @@ dependencies {
     implementation(libs.bundles.lifecycle)
     implementation(libs.androidx.lifecycle.process)
 
-    // Navigation
-    implementation(libs.androidx.navigation.compose)
-
-    // Permissions
-    implementation(libs.accompanist.permissions)
-
-    // QR
-    implementation(libs.zxing.core)
-    implementation(libs.mlkit.barcode.scanning)
-
-    // CameraX
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.compose)
-
     // Cryptography
     implementation(libs.bundles.cryptography)
 
@@ -102,17 +87,8 @@ dependencies {
     // Bluetooth
     implementation(libs.nordic.ble)
 
-    // WebSocket
-    implementation(libs.okhttp)
-
-    // Google Play Services Location
-    implementation(libs.gms.location)
-
     // Security preferences
     implementation(libs.androidx.security.crypto)
-
-    // EXIF orientation handling for images
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // Testing
     testImplementation(libs.bundles.testing)

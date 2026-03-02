@@ -7,7 +7,6 @@ import com.bitchat.android.model.RoutedPacket
 import com.bitchat.android.protocol.BitchatPacket
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.combine
 
 /**
  * Power-optimized Bluetooth connection manager with comprehensive memory management
@@ -90,39 +89,8 @@ class BluetoothConnectionManager(
 
     init {
         powerManager.delegate = this
-        // Observe debug settings to enforce role state while active
-        try {
-            val dbg = com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
-            // Role enable/disable
-            connectionScope.launch {
-                dbg.gattServerEnabled.collect { enabled ->
-                    if (!isActive) return@collect
-                    if (enabled) startServer() else stopServer()
-                }
-            }
-            connectionScope.launch {
-                dbg.gattClientEnabled.collect { enabled ->
-                    if (!isActive) return@collect
-                    if (enabled) startClient() else stopClient()
-                }
-            }
-            
-            // Centralized limit enforcement on any setting change
-            connectionScope.launch {
-                combine(
-                    dbg.maxConnectionsOverall,
-                    dbg.maxServerConnections,
-                    dbg.maxClientConnections
-                ) { _, _, _ -> 
-                    // We don't need the values here, we just need to trigger enforcement
-                    Unit 
-                }.collect {
-                    if (isActive) {
-                        enforceStrictLimits()
-                    }
-                }
-            }
-        } catch (_: Exception) { }
+        // Debug settings observers removed (ui/ deleted in Patch 16).
+        // Server and client are always enabled; connection limits use PowerManager defaults.
     }
     
     /**
@@ -130,19 +98,19 @@ class BluetoothConnectionManager(
      */
     private fun enforceStrictLimits() {
         if (!isActive) return
-        
+
         try {
-            val dbg = com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
-            val maxOverall = dbg.maxConnectionsOverall.value
-            val maxServer = dbg.maxServerConnections.value
-            val maxClient = dbg.maxClientConnections.value
-            
+            // Use PowerManager defaults (debug overrides removed in Patch 16)
+            val maxOverall = powerManager.getMaxConnections()
+            val maxServer = maxOverall
+            val maxClient = maxOverall
+
             // Get list of connections to evict to satisfy all constraints
             val toEvict = connectionTracker.getConnectionsToEvict(maxOverall, maxServer, maxClient)
-            
+
             if (toEvict.isNotEmpty()) {
                 Log.i(TAG, "Enforcing limits (max: $maxOverall, s: $maxServer, c: $maxClient) - evicting ${toEvict.size} connections")
-                
+
                 toEvict.forEach { conn ->
                     if (conn.isClient) {
                         Log.d(TAG, "Evicting client ${conn.device.address}")
@@ -196,32 +164,20 @@ class BluetoothConnectionManager(
                 // Start power manager
                 powerManager.start()
                 
-                // Start server/client based on debug settings
-                val dbg = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (_: Exception) { null }
-                val startServer = dbg?.gattServerEnabled?.value != false
-                val startClient = dbg?.gattClientEnabled?.value != false
-
-                if (startServer) {
-                    if (!serverManager.start()) {
-                        Log.e(TAG, "Failed to start server manager")
-                        this@BluetoothConnectionManager.isActive = false
-                        return@launch
-                    }
-                    Log.d(TAG, "GATT Server started")
-                } else {
-                    Log.i(TAG, "GATT Server disabled by debug settings; not starting")
+                // Server and client always enabled (debug overrides removed in Patch 16)
+                if (!serverManager.start()) {
+                    Log.e(TAG, "Failed to start server manager")
+                    this@BluetoothConnectionManager.isActive = false
+                    return@launch
                 }
+                Log.d(TAG, "GATT Server started")
 
-                if (startClient) {
-                    if (!clientManager.start()) {
-                        Log.e(TAG, "Failed to start client manager")
-                        this@BluetoothConnectionManager.isActive = false
-                        return@launch
-                    }
-                    Log.d(TAG, "GATT Client started")
-                } else {
-                    Log.i(TAG, "GATT Client disabled by debug settings; not starting")
+                if (!clientManager.start()) {
+                    Log.e(TAG, "Failed to start client manager")
+                    this@BluetoothConnectionManager.isActive = false
+                    return@launch
                 }
+                Log.d(TAG, "GATT Client started")
                 
                 Log.i(TAG, "Bluetooth services started successfully")
             }
@@ -399,9 +355,8 @@ class BluetoothConnectionManager(
             // Avoid rapid scan restarts by checking if we need to change scan behavior
             val wasUsingDutyCycle = powerManager.shouldUseDutyCycle()
             
-            // Update advertising with new power settings if server enabled
-            val serverEnabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattServerEnabled.value } catch (_: Exception) { true }
-            if (serverEnabled) {
+            // Update advertising with new power settings (always enabled; debug overrides removed in Patch 16)
+            if (true) {
                 serverManager.restartAdvertising()
             } else {
                 serverManager.stop()
@@ -411,8 +366,7 @@ class BluetoothConnectionManager(
             val nowUsingDutyCycle = powerManager.shouldUseDutyCycle()
             if (wasUsingDutyCycle != nowUsingDutyCycle) {
                 Log.d(TAG, "Duty cycle behavior changed (${wasUsingDutyCycle} -> ${nowUsingDutyCycle}), restarting scan")
-                val clientEnabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattClientEnabled.value } catch (_: Exception) { true }
-                if (clientEnabled) {
+                if (true) { // Always enabled (debug overrides removed in Patch 16)
                     clientManager.restartScanning()
                 } else {
                     clientManager.stop()

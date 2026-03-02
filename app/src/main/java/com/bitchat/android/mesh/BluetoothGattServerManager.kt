@@ -61,14 +61,6 @@ class BluetoothGattServerManager(
      * Start GATT server
      */
     fun start(): Boolean {
-        // Respect debug setting
-        try {
-            if (!com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattServerEnabled.value) {
-                Log.i(TAG, "Server start skipped: GATT Server disabled in debug settings")
-                return false
-            }
-        } catch (_: Exception) { }
-
         if (isActive) {
             Log.d(TAG, "GATT server already active; start is a no-op")
             return true
@@ -321,8 +313,7 @@ class BluetoothGattServerManager(
      */
     @Suppress("DEPRECATION")
     private fun startAdvertising() {
-        // Respect debug setting
-        val enabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattServerEnabled.value } catch (_: Exception) { true }
+        val enabled = true // Debug settings removed (Patch 16)
 
         // Guard conditions – never throw here to avoid crashing the app from a background coroutine
         if (!permissionManager.hasBluetoothPermissions()) {
@@ -411,8 +402,7 @@ class BluetoothGattServerManager(
      * Restart advertising (for power mode changes)
      */
     fun restartAdvertising() {
-        // Respect debug setting
-        val enabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattServerEnabled.value } catch (_: Exception) { true }
+        val enabled = true // Debug settings removed (Patch 16)
         if (!isActive || !enabled) {
             stopAdvertising()
             return

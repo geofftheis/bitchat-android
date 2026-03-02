@@ -16,8 +16,7 @@ import kotlinx.coroutines.channels.actor
  * from the same peer simultaneously, causing session management conflicts.
  */
 class PacketProcessor(private val myPeerID: String) {
-    private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
-    
+
     companion object {
         private const val TAG = "PacketProcessor"
     }
@@ -132,13 +131,7 @@ class PacketProcessor(private val myPeerID: String) {
         var validPacket = true
         val messageType = MessageType.fromValue(packet.type)
         Log.d(TAG, "Processing packet type ${messageType} from ${formatPeerForLog(peerID)}")
-        // Verbose logging to debug manager (and chat via ChatViewModel observer)
-        try {
-            val mt = messageType?.name ?: packet.type.toString()
-            val routeDevice = routed.relayAddress
-            val nick = delegate?.getPeerNickname(peerID)
-            debugManager?.logIncomingPacket(peerID, nick, mt, routeDevice)
-        } catch (_: Exception) { }
+        // Debug logging removed (ui/ deleted in Patch 16)
         
         
         // Handle public packet types (no address check needed)

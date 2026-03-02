@@ -61,6 +61,11 @@ class BluetoothPacketBroadcaster(
     /**
      * Debug logging helper - can be easily removed/disabled for production
      */
+    /**
+     * Debug logging helper — DebugSettingsManager removed in Patch 16.
+     * Kept as a no-op so call sites don't need changes.
+     */
+    @Suppress("UNUSED_PARAMETER")
     private fun logPacketRelay(
         typeName: String,
         senderPeerID: String,
@@ -73,39 +78,7 @@ class BluetoothPacketBroadcaster(
         packetVersion: UByte = 1u,
         routeInfo: String? = null
     ) {
-        try {
-            val fromNick = incomingPeer?.let { nicknameResolver?.invoke(it) }
-            val toNick = toPeer?.let { nicknameResolver?.invoke(it) }
-            val manager = com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
-            // Always log outgoing for the actual transmission target
-            manager.logOutgoing(
-                packetType = typeName,
-                toPeerID = toPeer,
-                toNickname = toNick,
-                toDeviceAddress = toDeviceAddress,
-                previousHopPeerID = incomingPeer,
-                packetVersion = packetVersion,
-                routeInfo = routeInfo
-            )
-            // Keep the verbose relay message for human readability
-            manager.logPacketRelayDetailed(
-                packetType = typeName,
-                senderPeerID = senderPeerID,
-                senderNickname = senderNick,
-                fromPeerID = incomingPeer,
-                fromNickname = fromNick,
-                fromDeviceAddress = incomingAddr,
-                toPeerID = toPeer,
-                toNickname = toNick,
-                toDeviceAddress = toDeviceAddress,
-                ttl = ttl,
-                isRelay = true,
-                packetVersion = packetVersion,
-                routeInfo = routeInfo
-            )
-        } catch (_: Exception) { 
-            // Silently ignore debug logging failures
-        }
+        // Debug logging removed (ui/ deleted in Patch 16)
     }
     
     // Data class to hold broadcast request information

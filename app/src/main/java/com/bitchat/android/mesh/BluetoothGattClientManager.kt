@@ -15,8 +15,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
 import kotlinx.coroutines.Job
-import com.bitchat.android.ui.debug.DebugSettingsManager
-import com.bitchat.android.ui.debug.DebugScanResult
+// DebugSettingsManager and DebugScanResult removed (ui/ deleted in Patch 16).
+// All references below replaced with inline defaults.
 
 /**
  * Manages GATT client operations, scanning, and client-side connections
@@ -74,13 +74,7 @@ class BluetoothGattClientManager(
      * Start client manager
      */
     fun start(): Boolean {
-        // Respect debug setting
-        try {
-            if (!com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattClientEnabled.value) {
-                Log.i(TAG, "Client start skipped: GATT Client disabled in debug settings")
-                return false
-            }
-        } catch (_: Exception) { }
+        // Debug gattClientEnabled check removed (ui/ deleted in Patch 16); always enabled.
 
         if (isActive) {
             Log.d(TAG, "GATT client already active; start is a no-op")
@@ -150,8 +144,7 @@ class BluetoothGattClientManager(
      * Handle scan state changes from power manager
      */
     fun onScanStateChanged(shouldScan: Boolean) {
-        val enabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattClientEnabled.value } catch (_: Exception) { true }
-        if (shouldScan && enabled) {
+        if (shouldScan) {
             startScanning()
         } else {
             stopScanning()
@@ -198,9 +191,7 @@ class BluetoothGattClientManager(
      */
     @Suppress("DEPRECATION")
     private fun startScanning() {
-        // Respect debug setting
-        val enabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattClientEnabled.value } catch (_: Exception) { true }
-        if (!permissionManager.hasBluetoothPermissions() || bleScanner == null || !isActive || !enabled) return
+        if (!permissionManager.hasBluetoothPermissions() || bleScanner == null || !isActive) return
         
         // Rate limit scan starts to prevent "scanning too frequently" errors
         val currentTime = System.currentTimeMillis()
@@ -341,32 +332,9 @@ class BluetoothGattClientManager(
         // Store RSSI from scan results for later use (especially for server connections)
         connectionTracker.updateScanRSSI(deviceAddress, rssi)
 
-        // Publish scan result to debug UI buffer
-        try {
-            DebugSettingsManager.getInstance().addScanResult(
-                DebugScanResult(
-                    deviceName = device.name,
-                    deviceAddress = deviceAddress,
-                    rssi = rssi,
-                    peerID = peerID // Use the discovered peerID if available
-                )
-            )
-        } catch (_: Exception) { }
-        
         // Power-aware RSSI filtering
         if (rssi < powerManager.getRSSIThreshold()) {
             Log.d(TAG, "Skipping device $deviceAddress due to weak signal: $rssi < ${powerManager.getRSSIThreshold()}")
-            // Even if we skip connecting, still publish scan result to debug UI
-            try {
-                DebugSettingsManager.getInstance().addScanResult(
-                    DebugScanResult(
-                        deviceName = device.name,
-                        deviceAddress = deviceAddress,
-                        rssi = rssi,
-                        peerID = peerID
-                    )
-                )
-            } catch (_: Exception) { }
             return
         }
         
@@ -382,9 +350,8 @@ class BluetoothGattClientManager(
         }
         
         // Check if connection limit is reached
-        val dbg = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (_: Exception) { null }
-        val maxOverall = dbg?.maxConnectionsOverall?.value ?: powerManager.getMaxConnections()
-        val maxClient = dbg?.maxClientConnections?.value ?: maxOverall
+        val maxOverall = powerManager.getMaxConnections()
+        val maxClient = maxOverall
 
         if (!connectionTracker.canConnectAsClient(maxOverall, maxClient)) {
             Log.d(TAG, "Client connection limit reached (overall: $maxOverall, client: $maxClient)")
@@ -567,9 +534,7 @@ class BluetoothGattClientManager(
      * Restart scanning for power mode changes
      */
     fun restartScanning() {
-        // Respect debug setting
-        val enabled = try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().gattClientEnabled.value } catch (_: Exception) { true }
-        if (!isActive || !enabled) return
+        if (!isActive) return
         
         connectionScope.launch {
             stopScanning()

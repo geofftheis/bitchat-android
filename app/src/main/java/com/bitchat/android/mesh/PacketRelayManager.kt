@@ -15,15 +15,12 @@ import kotlin.random.Random
  * All packets that aren't specifically addressed to us get processed here.
  */
 class PacketRelayManager(private val myPeerID: String) {
-    private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
-    
+
     companion object {
         private const val TAG = "PacketRelayManager"
     }
-    
-    private fun isRelayEnabled(): Boolean = try {
-        com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().packetRelayEnabled.value
-    } catch (_: Exception) { true }
+
+    private fun isRelayEnabled(): Boolean = true
 
     // Logging moved to BluetoothPacketBroadcaster per actual transmission target
     
