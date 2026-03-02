@@ -677,6 +677,11 @@ class BluetoothMeshService(private val context: Context) {
         Log.i(TAG, "Stopping Bluetooth mesh service")
         isActive = false
 
+        // Mark terminated synchronously so isReusable() returns false immediately.
+        // Previously set inside the async block, which allowed a race where
+        // scanForGames() could reuse this instance before termination completed.
+        terminated = true
+
         // Send leave announcement
         sendLeaveAnnouncement()
 
@@ -700,10 +705,8 @@ class BluetoothMeshService(private val context: Context) {
             messageHandler.shutdown()
             packetProcessor.shutdown()
 
-            // Mark this instance as terminated and cancel its scope so it won't be reused
-            terminated = true
             serviceScope.cancel()
-            Log.i(TAG, "BluetoothMeshService terminated and scope cancelled")
+            Log.i(TAG, "BluetoothMeshService scope cancelled")
         }
     }
 

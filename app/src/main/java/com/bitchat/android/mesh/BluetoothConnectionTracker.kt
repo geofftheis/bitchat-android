@@ -308,19 +308,24 @@ class BluetoothConnectionTracker(
      * Clean up all connections
      */
     private fun cleanupAllConnections() {
-        connectedDevices.values.forEach { deviceConn ->
-            deviceConn.gatt?.disconnect()
+        // Snapshot the GATT objects before clearAllConnections() clears the map
+        val gattObjects = connectedDevices.values.mapNotNull { it.gatt }
+
+        // Disconnect all
+        gattObjects.forEach { gatt ->
+            try { gatt.disconnect() } catch (_: Exception) { }
         }
-        
-        connectionScope.launch {
-            delay(CLEANUP_DELAY)
-            
-            connectedDevices.values.forEach { deviceConn ->
-                try {
-                    deviceConn.gatt?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing GATT during cleanup: ${e.message}")
-                }
+
+        // Close all synchronously — do NOT defer via coroutine.
+        // The deferred approach fails because:
+        // 1. clearAllConnections() clears the map before the coroutine runs
+        // 2. connectionScope.cancel() kills the coroutine
+        // Without close(), Android leaks GATT client slots (limit ~8 per app).
+        gattObjects.forEach { gatt ->
+            try {
+                gatt.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing GATT during cleanup: ${e.message}")
             }
         }
     }

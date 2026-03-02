@@ -426,14 +426,20 @@ class BluetoothGattClientManager(
                         }
                     } else {
                         Log.d(TAG, "Client: Cleanly disconnected from $deviceAddress")
-                        connectionTracker.cleanupDeviceConnection(deviceAddress)
                     }
+
+                    // Always clean up tracker entry regardless of error status.
+                    // Previously only called on clean disconnect, leaving stale entries
+                    // that counted against the connection limit.
+                    connectionTracker.cleanupDeviceConnection(deviceAddress)
 
                     // Notify higher layers about device disconnection to update direct flags
                     delegate?.onDeviceDisconnected(gatt.device)
 
-                    connectionScope.launch {
-                        delay(500) // CLEANUP_DELAY
+                    // Close GATT with NonCancellable so scope cancellation can't prevent it.
+                    // Without close(), Android leaks GATT client slots.
+                    connectionScope.launch(kotlinx.coroutines.NonCancellable) {
+                        delay(500) // Brief delay after disconnect before close
                         try {
                             gatt.close()
                         } catch (e: Exception) {
