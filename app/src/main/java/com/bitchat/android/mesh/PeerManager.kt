@@ -290,6 +290,18 @@ class PeerManager {
     }
     
     /**
+     * Mark peer as disconnected (GATT connection dropped).
+     * Half-Wit Patch 18: Without this, isConnected stays true and getActivePeerIDs()
+     * continues to include the peer until the 3-minute stale cleanup runs.
+     */
+    fun markPeerDisconnected(peerID: String) {
+        peers[peerID]?.let { info ->
+            peers[peerID] = info.copy(isConnected = false)
+            Log.d(TAG, "Marked peer $peerID as disconnected")
+        }
+    }
+
+    /**
      * Mark peer as announced to
      */
     fun markPeerAsAnnouncedTo(peerID: String) {

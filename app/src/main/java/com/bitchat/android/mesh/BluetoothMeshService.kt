@@ -553,7 +553,13 @@ class BluetoothMeshService(private val context: Context) {
                 // ConnectionTracker has already removed the address mapping; be defensive either way
                 connectionManager.addressPeerMap.remove(addr)
 
-                // refresh peer list on disconnect. 
+                // Half-Wit Patch 18: Mark the peer as disconnected so getActivePeerIDs()
+                // excludes it immediately, rather than waiting for the 3-minute stale cleanup.
+                if (peer != null) {
+                    peerManager.markPeerDisconnected(peer)
+                }
+
+                // refresh peer list on disconnect.
                 try { peerManager.refreshPeerList() } catch (_: Exception) { }
 
                 // Debug peer disconnection logging removed (ui/ deleted in Patch 16)
