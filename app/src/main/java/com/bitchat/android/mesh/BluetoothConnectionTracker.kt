@@ -299,7 +299,9 @@ class BluetoothConnectionTracker(
     fun cleanupDeviceConnection(deviceAddress: String) {
         connectedDevices.remove(deviceAddress)?.let { deviceConn ->
             subscribedDevices.removeAll { it.address == deviceAddress }
-            addressPeerMap.remove(deviceAddress)
+            // Half-Wit Patch 19: Don't remove addressPeerMap here.
+            // onDeviceDisconnected in BluetoothMeshService reads it to find the
+            // peer ID for markPeerDisconnected(), then removes it.
         }
         Log.d(TAG, "Cleaned up device connection for $deviceAddress")
     }

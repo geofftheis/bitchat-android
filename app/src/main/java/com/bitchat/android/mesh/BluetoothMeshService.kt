@@ -548,15 +548,18 @@ class BluetoothMeshService(private val context: Context) {
             override fun onDeviceDisconnected(device: android.bluetooth.BluetoothDevice) {
                 Log.d(TAG, "Device disconnected: ${device.address}")
                 val addr = device.address
-                // Remove mapping and, if that was the last direct path for the peer, clear direct flag
-                val peer = connectionManager.addressPeerMap[addr]
-                // ConnectionTracker has already removed the address mapping; be defensive either way
-                connectionManager.addressPeerMap.remove(addr)
+                // Half-Wit Patch 19: Read addressPeerMap BEFORE removing the entry.
+                // Previously, cleanupDeviceConnection() removed the mapping before this
+                // callback ran, causing markPeerDisconnected() to be skipped entirely.
+                // This prevented disconnect detection for iOS peers (and potentially others).
+                val peer = connectionManager.addressPeerMap.remove(addr)
 
                 // Half-Wit Patch 18: Mark the peer as disconnected so getActivePeerIDs()
                 // excludes it immediately, rather than waiting for the 3-minute stale cleanup.
                 if (peer != null) {
                     peerManager.markPeerDisconnected(peer)
+                } else {
+                    Log.w(TAG, "No addressPeerMap entry for $addr; disconnect may not propagate to app layer")
                 }
 
                 // refresh peer list on disconnect.
