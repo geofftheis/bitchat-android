@@ -157,7 +157,7 @@
   <string name="cd_remove_bookmark">Remove bookmark</string>
   <string name="cd_teleport">Teleport</string>
   <string name="cd_selected">Selected</string>
-  <string name="notification_action_quit_bitchat">Quit bitchat</string>
+  <string name="notification_action_quit_bitchat">Quit Half/Wit</string>
   <string name="about_background_title">run in background</string>
   <string name="about_background_desc">keep mesh active when app is closed (foreground service)</string>
   <string name="cd_leave_channel">Leave channel</string>
