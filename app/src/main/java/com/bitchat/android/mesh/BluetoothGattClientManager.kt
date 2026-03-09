@@ -28,7 +28,7 @@ class BluetoothGattClientManager(
     private val permissionManager: BluetoothPermissionManager,
     private val powerManager: PowerManager,
     private val delegate: BluetoothConnectionManagerDelegate?,
-    private val serviceUuid: UUID = serviceUuid
+    private val serviceUuid: UUID = com.bitchat.android.util.AppConstants.Mesh.Gatt.SERVICE_UUID
 ) {
     
     companion object {
