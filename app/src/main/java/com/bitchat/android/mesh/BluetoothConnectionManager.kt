@@ -14,9 +14,10 @@ import kotlinx.coroutines.flow.collect
  * Coordinates smaller, focused components for better maintainability
  */
 class BluetoothConnectionManager(
-    private val context: Context, 
+    private val context: Context,
     private val myPeerID: String,
-    private val fragmentManager: FragmentManager? = null
+    private val fragmentManager: FragmentManager? = null,
+    private val serviceUuid: java.util.UUID = com.bitchat.android.util.AppConstants.Mesh.Gatt.SERVICE_UUID
 ) : PowerManagerDelegate {
     
     companion object {
@@ -72,10 +73,10 @@ class BluetoothConnectionManager(
     }
     
     private val serverManager = BluetoothGattServerManager(
-        context, connectionScope, connectionTracker, permissionManager, powerManager, componentDelegate, myPeerID
+        context, connectionScope, connectionTracker, permissionManager, powerManager, componentDelegate, myPeerID, serviceUuid
     )
     private val clientManager = BluetoothGattClientManager(
-        context, connectionScope, connectionTracker, permissionManager, powerManager, componentDelegate
+        context, connectionScope, connectionTracker, permissionManager, powerManager, componentDelegate, serviceUuid
     )
     
     // Service state

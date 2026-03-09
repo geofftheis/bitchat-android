@@ -34,7 +34,10 @@ import kotlin.random.Random
  * - BluetoothConnectionManager: BLE connections and GATT operations
  * - PacketProcessor: Incoming packet routing
  */
-class BluetoothMeshService(private val context: Context) {
+class BluetoothMeshService(
+    private val context: Context,
+    private val serviceUuid: java.util.UUID = com.bitchat.android.util.AppConstants.Mesh.Gatt.SERVICE_UUID
+) {
     // debugManager removed (ui/ deleted in Patch 16); debug logging calls below replaced with no-ops
     
     companion object {
@@ -52,7 +55,7 @@ class BluetoothMeshService(private val context: Context) {
     private val securityManager = SecurityManager(encryptionService, myPeerID)
     private val storeForwardManager = StoreForwardManager()
     private val messageHandler = MessageHandler(myPeerID, context.applicationContext)
-    internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager) // Made internal for access
+    internal val connectionManager = BluetoothConnectionManager(context, myPeerID, fragmentManager, serviceUuid) // Made internal for access
     private val packetProcessor = PacketProcessor(myPeerID)
     private lateinit var gossipSyncManager: GossipSyncManager
     // serviceNotificationManager removed (ui/ deleted in Patch 16); Half-Wit has its own notification handling

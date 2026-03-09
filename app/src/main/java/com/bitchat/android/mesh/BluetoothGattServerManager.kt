@@ -25,7 +25,8 @@ class BluetoothGattServerManager(
     private val permissionManager: BluetoothPermissionManager,
     private val powerManager: PowerManager,
     private val delegate: BluetoothConnectionManagerDelegate?,
-    private val myPeerID: String
+    private val myPeerID: String,
+    private val serviceUuid: UUID = serviceUuid
 ) {
     
     companion object {
@@ -300,7 +301,7 @@ class BluetoothGattServerManager(
         )
         characteristic?.addDescriptor(descriptor)
         
-        val service = BluetoothGattService(AppConstants.Mesh.Gatt.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        val service = BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         service.addCharacteristic(characteristic)
         
         gattServer?.addService(service)
@@ -344,7 +345,7 @@ class BluetoothGattServerManager(
         val settings = powerManager.getAdvertiseSettings()
         
         val data = AdvertiseData.Builder()
-            .addServiceUuid(ParcelUuid(AppConstants.Mesh.Gatt.SERVICE_UUID))
+            .addServiceUuid(ParcelUuid(serviceUuid))
             .setIncludeTxPowerLevel(false)
             .setIncludeDeviceName(false)
             .build()
@@ -358,7 +359,7 @@ class BluetoothGattServerManager(
         }
         
         val scanResponse = AdvertiseData.Builder()
-            .addServiceData(ParcelUuid(AppConstants.Mesh.Gatt.SERVICE_UUID), peerIDBytes)
+            .addServiceData(ParcelUuid(serviceUuid), peerIDBytes)
             .setIncludeTxPowerLevel(false)
             .setIncludeDeviceName(false)
             .build()

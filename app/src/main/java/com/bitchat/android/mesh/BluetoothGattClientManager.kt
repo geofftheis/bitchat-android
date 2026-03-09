@@ -27,7 +27,8 @@ class BluetoothGattClientManager(
     private val connectionTracker: BluetoothConnectionTracker,
     private val permissionManager: BluetoothPermissionManager,
     private val powerManager: PowerManager,
-    private val delegate: BluetoothConnectionManagerDelegate?
+    private val delegate: BluetoothConnectionManagerDelegate?,
+    private val serviceUuid: UUID = serviceUuid
 ) {
     
     companion object {
@@ -216,12 +217,12 @@ class BluetoothGattClientManager(
         }
         
         val scanFilter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(AppConstants.Mesh.Gatt.SERVICE_UUID))
+            .setServiceUuid(ParcelUuid(serviceUuid))
             .build()
         
         val scanFilters = listOf(scanFilter) 
         
-        Log.d(TAG, "Starting BLE scan with target service UUID: ${AppConstants.Mesh.Gatt.SERVICE_UUID}")
+        Log.d(TAG, "Starting BLE scan with target service UUID: ${serviceUuid}")
         
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -306,13 +307,13 @@ class BluetoothGattClientManager(
         val scanRecord = result.scanRecord
         
         // CRITICAL: Only process devices that have our service UUID
-        val hasOurService = scanRecord?.serviceUuids?.any { it.uuid == AppConstants.Mesh.Gatt.SERVICE_UUID } == true
+        val hasOurService = scanRecord?.serviceUuids?.any { it.uuid == serviceUuid } == true
         if (!hasOurService) {
             return
         }
 
         // Try to extract peerID from Service Data (if available) for stable identity
-        val serviceData = scanRecord?.getServiceData(ParcelUuid(AppConstants.Mesh.Gatt.SERVICE_UUID))
+        val serviceData = scanRecord?.getServiceData(ParcelUuid(serviceUuid))
         val peerID = if (serviceData != null && serviceData.size >= 8) {
             serviceData.joinToString("") { "%02x".format(it) }
         } else {
@@ -444,7 +445,7 @@ class BluetoothGattClientManager(
 
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {                
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    val service = gatt.getService(AppConstants.Mesh.Gatt.SERVICE_UUID)
+                    val service = gatt.getService(serviceUuid)
                     if (service != null) {
                         val characteristic = service.getCharacteristic(AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID)
                         if (characteristic != null) {
