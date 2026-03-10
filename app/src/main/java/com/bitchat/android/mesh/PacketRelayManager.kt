@@ -52,9 +52,10 @@ class PacketRelayManager(private val myPeerID: String) {
             return
         }
         
-        // Check TTL and decrement
-        if (packet.ttl == 0u.toUByte()) {
-            Log.d(TAG, "TTL expired, not relaying packet")
+        // Check TTL — match iOS RelayController: suppress relay for TTL <= 1
+        // With Half-Wit Patch 7 (TTL=1), packets should be delivered locally but never relayed.
+        if (packet.ttl <= 1u.toUByte()) {
+            Log.d(TAG, "TTL too low (${packet.ttl}), not relaying packet")
             return
         }
         
