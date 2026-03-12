@@ -74,8 +74,8 @@ object AppConstants {
     }
 
     object Power {
-        const val CRITICAL_BATTERY_PERCENT: Int = 10
-        const val LOW_BATTERY_PERCENT: Int = 20
+        const val CRITICAL_BATTERY_PERCENT: Int = 4
+        const val LOW_BATTERY_PERCENT: Int = 7
         const val MEDIUM_BATTERY_PERCENT: Int = 50
         const val SCAN_ON_DURATION_NORMAL_MS: Long = 8_000L
         const val SCAN_OFF_DURATION_NORMAL_MS: Long = 2_000L
