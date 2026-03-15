@@ -11,6 +11,7 @@ import android.util.Log
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.util.AppConstants
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
@@ -46,6 +47,13 @@ class BluetoothGattServerManager(
     
     // State management
     private var isActive = false
+    // Patch 31: Track the restartAdvertising coroutine to prevent orphaned callbacks.
+    // If restartAdvertising() is called multiple times rapidly, each launch creates a
+    // new AdvertiseCallback but only the last is stored in advertiseCallback. The earlier
+    // callbacks become orphaned — their advertisements continue broadcasting on the BLE
+    // radio but can never be stopped. Cancelling the previous Job before launching a new
+    // one ensures only one restart is in-flight at a time.
+    private var restartJob: Job? = null
 
     // Optional game metadata byte for Half-Wit advertisement (Patch 26)
     // Bit 7: locked flag, Bits 0-3: player count
@@ -100,6 +108,12 @@ class BluetoothGattServerManager(
      * Stop GATT server
      */
     fun stop() {
+        // Patch 31: Cancel any pending restartAdvertising coroutine FIRST to prevent
+        // it from re-starting advertising after we stop. Without this, an in-flight
+        // restart could create an orphaned advertisement that persists on the BLE radio.
+        restartJob?.cancel()
+        restartJob = null
+
         if (!isActive) {
             // Idempotent stop
             stopAdvertising()
@@ -415,7 +429,13 @@ class BluetoothGattServerManager(
             return
         }
 
-        connectionScope.launch {
+        // Patch 31: Cancel any previous restart coroutine before launching a new one.
+        // Without this, rapid calls (e.g., multiple updateGameMetadata() in succession)
+        // each launch a coroutine that creates a new AdvertiseCallback. Only the last
+        // callback is stored in advertiseCallback, so earlier ones become orphaned —
+        // their BLE advertisements continue broadcasting but can never be stopped.
+        restartJob?.cancel()
+        restartJob = connectionScope.launch {
             stopAdvertising()
             delay(100)
             startAdvertising()
