@@ -55,6 +55,14 @@ class BluetoothGattServerManager(
     // one ensures only one restart is in-flight at a time.
     private var restartJob: Job? = null
 
+    // Patch 32: Track server connections pending setup completion.
+    // When a new GATT server registers, Android may deliver "device connected" callbacks
+    // for stale ACL links from a previous session. These zombie connections never complete
+    // setup (no MTU negotiation, no descriptor subscription) but block the BLE client from
+    // initiating a fresh outbound connection to the same device. We disconnect them after
+    // 4 seconds if setup hasn't completed.
+    private val pendingServerConnections = mutableMapOf<String, Job>()
+
     // Optional game metadata byte for Half-Wit advertisement (Patch 26)
     // Bit 7: locked flag, Bits 0-3: player count
     var gameMetadataByte: Byte? = null
@@ -113,6 +121,9 @@ class BluetoothGattServerManager(
         // restart could create an orphaned advertisement that persists on the BLE radio.
         restartJob?.cancel()
         restartJob = null
+        // Patch 32: Cancel all pending stale-connection timeouts
+        pendingServerConnections.values.forEach { it.cancel() }
+        pendingServerConnections.clear()
 
         if (!isActive) {
             // Idempotent stop
@@ -172,10 +183,10 @@ class BluetoothGattServerManager(
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
                         Log.i(TAG, "Server: Device connected ${device.address}")
-                        
+
                         // Get best available RSSI (scan RSSI for server connections)
                         val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
-                        
+
                         val deviceConn = BluetoothConnectionTracker.DeviceConnection(
                             device = device,
                             rssi = rssi,
@@ -189,9 +200,26 @@ class BluetoothGattServerManager(
                                 delegate?.onDeviceConnected(device)
                             }
                         }
+
+                        // Patch 32: Disconnect stale ACL links that never complete setup
+                        pendingServerConnections[device.address]?.cancel()
+                        pendingServerConnections[device.address] = connectionScope.launch {
+                            delay(4000)
+                            if (isActive && pendingServerConnections.containsKey(device.address)) {
+                                Log.w(TAG, "Server: Connection to ${device.address} did not complete setup within 4s, disconnecting stale ACL")
+                                pendingServerConnections.remove(device.address)
+                                try {
+                                    gattServer?.cancelConnection(device)
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Server: Error disconnecting stale device ${device.address}: ${e.message}")
+                                }
+                            }
+                        }
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.i(TAG, "Server: Device disconnected ${device.address}")
+                        // Patch 32: Clean up pending timeout if device disconnected
+                        pendingServerConnections.remove(device.address)?.cancel()
                         connectionTracker.cleanupDeviceConnection(device.address)
                         // Notify delegate about device disconnection so higher layers can update direct flags
                         delegate?.onDeviceDisconnected(device)
@@ -263,6 +291,8 @@ class BluetoothGattServerManager(
                 
                 if (BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)) {
                     connectionTracker.addSubscribedDevice(device)
+                    // Patch 32: Setup completed — cancel the stale-connection timeout
+                    pendingServerConnections.remove(device.address)?.cancel()
 
                     Log.d(TAG, "Server: Connection setup complete for ${device.address}")
                     connectionScope.launch {
