@@ -358,6 +358,14 @@ class BluetoothGattServerManager(
             return
         }
 
+        // Patch 31: Stop any existing advertisement before starting a new one.
+        // Multiple coroutines can call startAdvertising() concurrently (e.g., the
+        // initial start() coroutine races with restartAdvertising() from setGameMetadata).
+        // Each call creates a new AdvertiseCallback, but Android's BLE stack tracks
+        // advertisements by callback object — the old one keeps broadcasting as an orphan.
+        // Stopping first ensures at most one advertisement is active at any time.
+        stopAdvertising()
+
         val settings = powerManager.getAdvertiseSettings()
         
         val dataBuilder = AdvertiseData.Builder()
