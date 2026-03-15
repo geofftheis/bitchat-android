@@ -229,7 +229,10 @@ class MeshForegroundService : Service() {
         if (!hasBluetoothPermissions()) return
         try {
             android.util.Log.d("MeshForegroundService", "Ensuring mesh service is started")
-            val service = MeshServiceHolder.getOrCreate(applicationContext)
+            // If a service already exists (e.g., created by BitchatAdapter with a specific UUID),
+            // reuse it as-is. Only create a new default-UUID instance when no service exists.
+            // This prevents overwriting an app-specific UUID with the default one.
+            val service = MeshServiceHolder.meshService ?: MeshServiceHolder.getOrCreate(applicationContext)
             service.startServices()
         } catch (e: Exception) {
             android.util.Log.e("MeshForegroundService", "Failed to start mesh service: ${e.message}")
