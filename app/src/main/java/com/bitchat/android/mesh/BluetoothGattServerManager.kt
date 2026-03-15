@@ -47,6 +47,10 @@ class BluetoothGattServerManager(
     // State management
     private var isActive = false
 
+    // Optional game metadata byte for Half-Wit advertisement (Patch 26)
+    // Bit 7: locked flag, Bits 0-3: player count
+    var gameMetadataByte: Byte? = null
+
     /**
      * Disconnect a specific device (used by ConnectionManager to enforce overall limits)
      */
@@ -344,11 +348,15 @@ class BluetoothGattServerManager(
 
         val settings = powerManager.getAdvertiseSettings()
         
-        val data = AdvertiseData.Builder()
+        val dataBuilder = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(serviceUuid))
             .setIncludeTxPowerLevel(false)
             .setIncludeDeviceName(false)
-            .build()
+        // Patch 26: Include game metadata as manufacturer data if set
+        gameMetadataByte?.let { meta ->
+            dataBuilder.addManufacturerData(0xFFFF, byteArrayOf(meta))
+        }
+        val data = dataBuilder.build()
             
         // Add stable identity (first 8 bytes of peerID) to Scan Response
         // This allows scanners to deduplicate devices even if MAC address rotates
@@ -414,5 +422,14 @@ class BluetoothGattServerManager(
             delay(100)
             startAdvertising()
         }
+    }
+
+    /**
+     * Patch 26: Update game metadata and restart advertising to broadcast the new value.
+     * Pass null to clear metadata from the advertisement.
+     */
+    fun updateGameMetadata(metadataByte: Byte?) {
+        this.gameMetadataByte = metadataByte
+        restartAdvertising()
     }
 }

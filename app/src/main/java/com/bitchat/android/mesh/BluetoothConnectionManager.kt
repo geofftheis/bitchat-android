@@ -88,6 +88,11 @@ class BluetoothConnectionManager(
     // Public property for address-peer mapping
     val addressPeerMap get() = connectionTracker.addressPeerMap
 
+    /** Patch 26: Update game metadata byte in BLE advertisement. */
+    fun updateGameMetadata(metadataByte: Byte?) {
+        serverManager.updateGameMetadata(metadataByte)
+    }
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).

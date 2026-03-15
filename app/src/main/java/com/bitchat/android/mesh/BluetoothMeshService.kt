@@ -65,6 +65,11 @@ class BluetoothMeshService(
     
     // Delegate for message callbacks (maintains same interface)
     var delegate: BluetoothMeshDelegate? = null
+
+    /** Patch 26: Update game metadata byte in BLE advertisement. */
+    fun updateGameMetadata(metadataByte: Byte?) {
+        connectionManager.updateGameMetadata(metadataByte)
+    }
     
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
