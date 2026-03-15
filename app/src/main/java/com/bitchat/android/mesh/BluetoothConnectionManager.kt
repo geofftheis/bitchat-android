@@ -202,26 +202,22 @@ class BluetoothConnectionManager(
      */
     fun stopServices() {
         Log.i(TAG, "Stopping power-optimized Bluetooth services")
-        
+
         isActive = false
-        
-        connectionScope.launch {
-            Log.d(TAG, "Stopping client/server and power components...")
-            // Stop component managers
-            clientManager.stop()
-            serverManager.stop()
-            
-            // Stop power manager
-            powerManager.stop()
-            
-            // Stop connection tracker
-            connectionTracker.stop()
-            
-            // Cancel the coroutine scope
-            connectionScope.cancel()
-            
-            Log.i(TAG, "All Bluetooth services stopped")
-        }
+
+        // Stop BLE advertising and GATT server/client synchronously so they
+        // aren't skipped if the coroutine scope is cancelled or never executes.
+        // These are lightweight Bluetooth API calls safe to run on any thread.
+        Log.d(TAG, "Stopping client/server and power components...")
+        clientManager.stop()
+        serverManager.stop()
+        powerManager.stop()
+        connectionTracker.stop()
+
+        // Cancel the coroutine scope to clean up any background jobs
+        connectionScope.cancel()
+
+        Log.i(TAG, "All Bluetooth services stopped")
     }
 
     /**

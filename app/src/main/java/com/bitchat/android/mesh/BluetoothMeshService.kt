@@ -658,25 +658,24 @@ class BluetoothMeshService(
         // async cleanup below finishes, the reused instance won't have stale data.
         clearSessionState()
 
-        serviceScope.launch {
-            Log.d(TAG, "Stopping subcomponents and cancelling scope...")
-            delay(200) // Give leave message time to send
+        // Stop BLE services synchronously so advertising and GATT server are
+        // guaranteed to stop before this method returns. Previously this was
+        // inside serviceScope.launch with a 200ms delay, which could be skipped
+        // if the scope was cancelled or the object was garbage collected.
+        Log.d(TAG, "Stopping subcomponents...")
+        gossipSyncManager.stop()
+        Log.d(TAG, "GossipSyncManager stopped")
+        connectionManager.stopServices()
+        Log.d(TAG, "BluetoothConnectionManager stopped")
+        peerManager.shutdown()
+        fragmentManager.shutdown()
+        securityManager.shutdown()
+        storeForwardManager.shutdown()
+        messageHandler.shutdown()
+        packetProcessor.shutdown()
 
-            // Stop all components
-            gossipSyncManager.stop()
-            Log.d(TAG, "GossipSyncManager stopped")
-            connectionManager.stopServices()
-            Log.d(TAG, "BluetoothConnectionManager stop requested")
-            peerManager.shutdown()
-            fragmentManager.shutdown()
-            securityManager.shutdown()
-            storeForwardManager.shutdown()
-            messageHandler.shutdown()
-            packetProcessor.shutdown()
-
-            serviceScope.cancel()
-            Log.i(TAG, "BluetoothMeshService scope cancelled")
-        }
+        serviceScope.cancel()
+        Log.i(TAG, "BluetoothMeshService scope cancelled")
     }
 
     /**

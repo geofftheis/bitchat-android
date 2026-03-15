@@ -125,20 +125,19 @@ class BluetoothGattClientManager(
         }
 
         isActive = false
-        
-        connectionScope.launch {
-            // Disconnect all client connections decisively
-            try {
-                val conns = connectionTracker.getConnectedDevices().values.filter { it.isClient && it.gatt != null }
-                conns.forEach { dc ->
-                    try { dc.gatt?.disconnect() } catch (_: Exception) { }
-                }
-            } catch (_: Exception) { }
-            
-            stopScanning()
-            stopRSSIMonitoring()
-            Log.i(TAG, "GATT client manager stopped")
-        }
+
+        // Stop synchronously so cleanup isn't skipped if connectionScope
+        // is cancelled before this coroutine executes.
+        try {
+            val conns = connectionTracker.getConnectedDevices().values.filter { it.isClient && it.gatt != null }
+            conns.forEach { dc ->
+                try { dc.gatt?.disconnect() } catch (_: Exception) { }
+            }
+        } catch (_: Exception) { }
+
+        stopScanning()
+        stopRSSIMonitoring()
+        Log.i(TAG, "GATT client manager stopped")
     }
     
     /**
