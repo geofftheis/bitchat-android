@@ -146,6 +146,10 @@ class MeshForegroundService : Service() {
         }
         when (intent?.action) {
             ACTION_STOP -> {
+                // Cancel the periodic update loop FIRST to prevent it from
+                // recreating the mesh service after we clear it (Patch 30)
+                updateJob?.cancel()
+                updateJob = null
                 // Stop FGS and mesh cleanly
                 try { meshService?.stopServices() } catch (_: Exception) { }
                 try { MeshServiceHolder.clear() } catch (_: Exception) { }
