@@ -112,24 +112,22 @@ class BluetoothGattServerManager(
 
         isActive = false
 
-        connectionScope.launch {
-            stopAdvertising()
-            
-            // Try to cancel any active connections explicitly before closing
-            try {
-                // Disconnect ALL server connections
-                val servers = connectionTracker.getConnectedDevices().values.filter { !it.isClient }
-                servers.forEach { d ->
-                    try { gattServer?.cancelConnection(d.device) } catch (_: Exception) { }
-                }
-            } catch (_: Exception) { }
-            
-            // Close GATT server
-            gattServer?.close()
-            gattServer = null
-            
-            Log.i(TAG, "GATT server stopped")
-        }
+        // Stop advertising and close GATT server synchronously so they aren't
+        // skipped when connectionScope is cancelled immediately after stop().
+        stopAdvertising()
+
+        // Try to cancel any active connections explicitly before closing
+        try {
+            val servers = connectionTracker.getConnectedDevices().values.filter { !it.isClient }
+            servers.forEach { d ->
+                try { gattServer?.cancelConnection(d.device) } catch (_: Exception) { }
+            }
+        } catch (_: Exception) { }
+
+        gattServer?.close()
+        gattServer = null
+
+        Log.i(TAG, "GATT server stopped")
     }
     
     /**
