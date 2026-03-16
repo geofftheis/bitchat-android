@@ -149,27 +149,14 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
         val builder = ScanSettings.Builder()
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
 
-        when (currentMode) {
-            PowerMode.PERFORMANCE -> builder
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-                .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
-
-            PowerMode.BALANCED -> builder
-                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
-                .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-                .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
-
-            PowerMode.POWER_SAVER -> builder
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
-                .setMatchMode(ScanSettings.MATCH_MODE_STICKY)
-                .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
-
-            PowerMode.ULTRA_LOW_POWER -> builder
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
-                .setMatchMode(ScanSettings.MATCH_MODE_STICKY)
-                .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
-        }
+        // Patch 34: Always use LOW_LATENCY scan mode regardless of power mode.
+        // Half-Wit games are short sessions where fast device discovery is critical.
+        // A brief POWER_SAVER transition during mesh startup was causing the scan to
+        // use LOW_POWER mode, which found zero devices in 29 seconds on Pixel 9 Pro.
+        builder
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
 
         return builder.setReportDelay(0).build()
     }
