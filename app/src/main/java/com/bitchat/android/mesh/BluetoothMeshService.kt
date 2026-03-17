@@ -70,7 +70,12 @@ class BluetoothMeshService(
     fun updateGameMetadata(metadataByte: Byte?) {
         connectionManager.updateGameMetadata(metadataByte)
     }
-    
+
+    /** Patch 36: Forward advertising failure callback to connection manager. */
+    var onAdvertisingFailed: ((Int) -> Unit)?
+        get() = connectionManager.onAdvertisingFailed
+        set(value) { connectionManager.onAdvertisingFailed = value }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Tracks whether this instance has been terminated via stopServices()

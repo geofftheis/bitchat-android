@@ -93,6 +93,11 @@ class BluetoothConnectionManager(
         serverManager.updateGameMetadata(metadataByte)
     }
 
+    /** Patch 36: Forward advertising failure callback to server manager. */
+    var onAdvertisingFailed: ((Int) -> Unit)?
+        get() = serverManager.onAdvertisingFailed
+        set(value) { serverManager.onAdvertisingFailed = value }
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).

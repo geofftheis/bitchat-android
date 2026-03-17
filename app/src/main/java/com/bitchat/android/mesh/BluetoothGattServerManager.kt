@@ -14,7 +14,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.*
+import kotlin.coroutines.resume
 
 /**
  * Manages GATT server operations, advertising, and server-side connections
@@ -58,6 +60,10 @@ class BluetoothGattServerManager(
     // Optional game metadata byte for Half-Wit advertisement (Patch 26)
     // Bit 7: locked flag, Bits 0-3: player count
     var gameMetadataByte: Byte? = null
+
+    // Patch 36: Callback invoked when advertising fails after all retry attempts.
+    // Allows the consuming app to detect slot exhaustion and notify the user.
+    var onAdvertisingFailed: ((Int) -> Unit)? = null
 
     /**
      * Disconnect a specific device (used by ConnectionManager to enforce overall limits)
@@ -327,10 +333,14 @@ class BluetoothGattServerManager(
     /**
      * Start advertising
      */
+    /**
+     * Patch 36: Start advertising with retry logic. Retries up to 10 times at 100ms
+     * intervals when all BLE advertising slots are occupied (error code 4:
+     * ADVERTISE_FAILED_TOO_MANY_ADVERTISERS). If all attempts fail, invokes the
+     * onAdvertisingFailed callback so the app can notify the user.
+     */
     @Suppress("DEPRECATION")
-    private fun startAdvertising() {
-        val enabled = true // Debug settings removed (Patch 16)
-
+    private suspend fun startAdvertising() {
         // Guard conditions – never throw here to avoid crashing the app from a background coroutine
         if (!permissionManager.hasBluetoothPermissions()) {
             Log.w(TAG, "Not starting advertising: missing Bluetooth permissions")
@@ -344,10 +354,6 @@ class BluetoothGattServerManager(
             Log.d(TAG, "Not starting advertising: manager not active")
             return
         }
-        if (!enabled) {
-            Log.i(TAG, "Not starting advertising: GATT Server disabled via debug settings")
-            return
-        }
         if (bleAdvertiser == null) {
             Log.w(TAG, "Not starting advertising: BLE advertiser not available on this device")
             return
@@ -357,16 +363,8 @@ class BluetoothGattServerManager(
             return
         }
 
-        // Patch 31: Stop any existing advertisement before starting a new one.
-        // Multiple coroutines can call startAdvertising() concurrently (e.g., the
-        // initial start() coroutine races with restartAdvertising() from setGameMetadata).
-        // Each call creates a new AdvertiseCallback, but Android's BLE stack tracks
-        // advertisements by callback object — the old one keeps broadcasting as an orphan.
-        // Stopping first ensures at most one advertisement is active at any time.
-        stopAdvertising()
-
         val settings = powerManager.getAdvertiseSettings()
-        
+
         val dataBuilder = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(serviceUuid))
             .setIncludeTxPowerLevel(false)
@@ -376,7 +374,7 @@ class BluetoothGattServerManager(
             dataBuilder.addManufacturerData(0xFFFF, byteArrayOf(meta))
         }
         val data = dataBuilder.build()
-            
+
         // Add stable identity (first 8 bytes of peerID) to Scan Response
         // This allows scanners to deduplicate devices even if MAC address rotates
         val peerIDBytes = try {
@@ -384,33 +382,64 @@ class BluetoothGattServerManager(
         } catch (e: Exception) {
             ByteArray(0)
         }
-        
+
         val scanResponse = AdvertiseData.Builder()
             .addServiceData(ParcelUuid(serviceUuid), peerIDBytes)
             .setIncludeTxPowerLevel(false)
             .setIncludeDeviceName(false)
             .build()
-        
-        advertiseCallback = object : AdvertiseCallback() {
-            override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-                val mode = try {
-                    powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
-                } catch (_: Exception) { "unknown" }
-                Log.i(TAG, "Advertising started (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
+
+        val maxAttempts = 10
+        var lastErrorCode = -1
+
+        for (attempt in 1..maxAttempts) {
+            // Patch 31: Stop any existing advertisement before starting a new one.
+            stopAdvertising()
+
+            val result = try {
+                suspendCancellableCoroutine<Int> { cont ->
+                    val callback = object : AdvertiseCallback() {
+                        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+                            val mode = try {
+                                powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
+                            } catch (_: Exception) { "unknown" }
+                            Log.i(TAG, "Advertising started on attempt $attempt/$maxAttempts (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
+                            cont.resume(0)
+                        }
+
+                        override fun onStartFailure(errorCode: Int) {
+                            Log.w(TAG, "Advertising failed on attempt $attempt/$maxAttempts (error=$errorCode)")
+                            cont.resume(errorCode)
+                        }
+                    }
+                    advertiseCallback = callback
+                    bleAdvertiser.startAdvertising(settings, data, scanResponse, callback)
+                }
+            } catch (se: SecurityException) {
+                Log.e(TAG, "SecurityException starting advertising (missing permission?): ${se.message}")
+                return
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception starting advertising: ${e.message}")
+                return
             }
-            
-            override fun onStartFailure(errorCode: Int) {
-                Log.e(TAG, "Advertising failed: $errorCode")
+
+            if (result == 0) return // Success
+
+            lastErrorCode = result
+
+            // Only retry for TOO_MANY_ADVERTISERS (error 4); other errors are not transient
+            if (result != AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
+                Log.e(TAG, "Advertising failed with non-retryable error: $result")
+                break
+            }
+
+            if (attempt < maxAttempts) {
+                delay(100)
             }
         }
-        
-        try {
-            bleAdvertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
-        } catch (se: SecurityException) {
-            Log.e(TAG, "SecurityException starting advertising (missing permission?): ${se.message}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception starting advertising: ${e.message}")
-        }
+
+        Log.e(TAG, "Advertising failed after $maxAttempts attempts (last error=$lastErrorCode)")
+        onAdvertisingFailed?.invoke(lastErrorCode)
     }
     
     /**
