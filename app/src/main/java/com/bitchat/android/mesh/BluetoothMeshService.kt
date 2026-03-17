@@ -138,14 +138,17 @@ class BluetoothMeshService(
     }
 
     /**
-     * Send broadcast announcement every 30 seconds
+     * Send broadcast announcement every 8 seconds
+     * Half-Wit Patch 35: Reduced from 30s to 8s so that newly-established
+     * GATT connections are recognised as mesh peers faster, preventing the
+     * "stuck on Connecting..." scenario after a cancel-and-rejoin cycle.
      */
     private fun sendPeriodicBroadcastAnnounce() {
         serviceScope.launch {
             Log.d(TAG, "Starting periodic announce loop")
             while (isActive) {
                 try {
-                    delay(30000) // 30 seconds
+                    delay(8000) // Half-Wit Patch 35: 8 seconds (was 30)
                     sendBroadcastAnnounce()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in periodic broadcast announce: ${e.message}")
