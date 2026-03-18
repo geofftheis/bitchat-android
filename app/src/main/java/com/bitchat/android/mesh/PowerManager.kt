@@ -143,22 +143,37 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
     }
     
     /**
-     * Get scan settings optimized for current power mode
+     * Get aggressive scan settings for fast device discovery (joiners connecting to a game).
+     * Patch 34: Always use LOW_LATENCY scan mode regardless of power mode.
+     * Half-Wit games are short sessions where fast device discovery is critical.
+     * A brief POWER_SAVER transition during mesh startup was causing the scan to
+     * use LOW_POWER mode, which found zero devices in 29 seconds on Pixel 9 Pro.
      */
     fun getScanSettings(): ScanSettings {
         val builder = ScanSettings.Builder()
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
 
-        // Patch 34: Always use LOW_LATENCY scan mode regardless of power mode.
-        // Half-Wit games are short sessions where fast device discovery is critical.
-        // A brief POWER_SAVER transition during mesh startup was causing the scan to
-        // use LOW_POWER mode, which found zero devices in 29 seconds on Pixel 9 Pro.
         builder
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
             .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
 
         return builder.setReportDelay(0).build()
+    }
+
+    /**
+     * Patch 39: Get low-power scan settings for mesh maintenance after joining/hosting a game.
+     * Uses BALANCED mode (~33% duty cycle) with STICKY matching to keep the mesh healthy
+     * while dedicating most radio time to game message throughput.
+     */
+    fun getMeshMaintenanceScanSettings(): ScanSettings {
+        return ScanSettings.Builder()
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setMatchMode(ScanSettings.MATCH_MODE_STICKY)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_FEW_ADVERTISEMENT)
+            .setReportDelay(0)
+            .build()
     }
     
     /**

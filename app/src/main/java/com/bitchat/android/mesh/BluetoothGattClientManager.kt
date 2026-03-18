@@ -74,8 +74,9 @@ class BluetoothGattClientManager(
     // State management
     private var isActive = false
 
-    // Patch 39: Allow disabling scanning for host devices to reduce BLE radio contention
-    var scanningEnabled = true
+    // Patch 39: Mesh-maintenance mode uses BALANCED/STICKY scan settings instead of aggressive LOW_LATENCY.
+    // Host devices start in this mode from transport init; joiners switch to it after joining.
+    var meshMaintenanceMode = false
     
     /**
      * Start client manager
@@ -105,9 +106,7 @@ class BluetoothGattClientManager(
         isActive = true
         
         connectionScope.launch {
-            if (!scanningEnabled) {
-                Log.i(TAG, "Scanning disabled (host mode) — skipping BLE scan")
-            } else if (powerManager.shouldUseDutyCycle()) {
+            if (powerManager.shouldUseDutyCycle()) {
                 Log.i(TAG, "Using power-aware duty cycling")
             } else {
                 startScanning()
@@ -279,8 +278,9 @@ class BluetoothGattClientManager(
             lastScanStartTime = currentTime
             isCurrentlyScanning = true
             
-            bleScanner.startScan(scanFilters, powerManager.getScanSettings(), scanCallback)
-            Log.d(TAG, "BLE scan started successfully")
+            val scanSettings = if (meshMaintenanceMode) powerManager.getMeshMaintenanceScanSettings() else powerManager.getScanSettings()
+            bleScanner.startScan(scanFilters, scanSettings, scanCallback)
+            Log.d(TAG, "BLE scan started successfully (meshMaintenance=$meshMaintenanceMode)")
         } catch (e: Exception) {
             Log.e(TAG, "Exception starting scan: ${e.message}")
             isCurrentlyScanning = false
@@ -543,6 +543,17 @@ class BluetoothGattClientManager(
         }
     }
     
+    /**
+     * Patch 39: Switch to mesh-maintenance scan mode and restart scanning.
+     * Uses BALANCED/STICKY settings to keep the mesh healthy while reducing radio load.
+     */
+    fun switchToMeshMaintenanceMode() {
+        meshMaintenanceMode = true
+        if (!isActive) return
+        Log.i(TAG, "Switching to mesh-maintenance scan mode (BALANCED/STICKY)")
+        restartScanning()
+    }
+
     /**
      * Restart scanning for power mode changes
      */

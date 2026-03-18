@@ -71,10 +71,10 @@ class BluetoothMeshService(
         connectionManager.updateGameMetadata(metadataByte)
     }
 
-    /** Patch 39: Allow disabling scanning for host devices to reduce BLE radio contention. */
-    var scanningEnabled: Boolean
-        get() = connectionManager.scanningEnabled
-        set(value) { connectionManager.scanningEnabled = value }
+    /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/STICKY). */
+    fun switchToMeshMaintenanceMode() {
+        connectionManager.switchToMeshMaintenanceMode()
+    }
 
     /** Patch 39: Stop BLE scanning (e.g. after joiner connects to game). */
     fun stopScanning() {
