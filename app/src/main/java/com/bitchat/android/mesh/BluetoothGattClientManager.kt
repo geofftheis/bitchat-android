@@ -63,7 +63,10 @@ class BluetoothGattClientManager(
     private var lastScanStartTime = 0L
     private var lastScanStopTime = 0L
     private var isCurrentlyScanning = false
-    private val scanRateLimit = 5000L // Minimum 5 seconds between scan start attempts
+    // Half-Wit Patch 37: Reduced from 5000ms to 2000ms. The 5s limit was overly
+    // conservative and wasted scan budget headroom during cancel-and-rejoin cycles,
+    // causing Android devices to stall on "Connecting..." for 10-20 seconds.
+    private val scanRateLimit = 2000L // Minimum 2 seconds between scan start attempts
     
     // RSSI monitoring state
     private var rssiMonitoringJob: Job? = null
@@ -249,9 +252,14 @@ class BluetoothGattClientManager(
                     5 -> Log.e(TAG, "SCAN_FAILED_OUT_OF_HARDWARE_RESOURCES")
                     6 -> {
                         Log.e(TAG, "SCAN_FAILED_SCANNING_TOO_FREQUENTLY")
-                        Log.w(TAG, "Scan failed due to rate limiting - will retry after delay")
+                        // Half-Wit Patch 38: Reduced retry from 10s to 2s. The 10s penalty
+                        // was too harsh — Android's rate limiter window rolls continuously,
+                        // so scan quota frees up well before 10s. The long wait caused
+                        // Android devices joining iOS-hosted games to stall on "Connecting..."
+                        // because the Android couldn't scan and iOS inbound discovery is slow.
+                        Log.w(TAG, "Scan failed due to rate limiting - will retry after 2s")
                         connectionScope.launch {
-                            delay(10000) // Wait 10 seconds before retrying
+                            delay(2000) // Wait 2 seconds before retrying
                             if (isActive) {
                                 startScanning()
                             }
