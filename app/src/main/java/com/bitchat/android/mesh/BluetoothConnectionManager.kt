@@ -88,7 +88,7 @@ class BluetoothConnectionManager(
     // Public property for address-peer mapping
     val addressPeerMap get() = connectionTracker.addressPeerMap
 
-    /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/STICKY). */
+    /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/AGGRESSIVE). */
     fun switchToMeshMaintenanceMode() {
         clientManager.switchToMeshMaintenanceMode()
     }

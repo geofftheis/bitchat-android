@@ -71,7 +71,7 @@ class BluetoothMeshService(
         connectionManager.updateGameMetadata(metadataByte)
     }
 
-    /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/STICKY). */
+    /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/AGGRESSIVE). */
     fun switchToMeshMaintenanceMode() {
         connectionManager.switchToMeshMaintenanceMode()
     }

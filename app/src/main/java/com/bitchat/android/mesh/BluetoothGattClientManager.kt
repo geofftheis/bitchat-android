@@ -74,7 +74,7 @@ class BluetoothGattClientManager(
     // State management
     private var isActive = false
 
-    // Patch 39: Mesh-maintenance mode uses BALANCED/STICKY scan settings instead of aggressive LOW_LATENCY.
+    // Patch 39: Mesh-maintenance mode uses BALANCED/AGGRESSIVE scan settings instead of aggressive LOW_LATENCY.
     // Host devices start in this mode from transport init; joiners switch to it after joining.
     var meshMaintenanceMode = false
     
@@ -545,12 +545,12 @@ class BluetoothGattClientManager(
     
     /**
      * Patch 39: Switch to mesh-maintenance scan mode and restart scanning.
-     * Uses BALANCED/STICKY settings to keep the mesh healthy while reducing radio load.
+     * Uses BALANCED/AGGRESSIVE settings to keep the mesh healthy while reducing radio load.
      */
     fun switchToMeshMaintenanceMode() {
         meshMaintenanceMode = true
         if (!isActive) return
-        Log.i(TAG, "Switching to mesh-maintenance scan mode (BALANCED/STICKY)")
+        Log.i(TAG, "Switching to mesh-maintenance scan mode (BALANCED/AGGRESSIVE)")
         restartScanning()
     }
 

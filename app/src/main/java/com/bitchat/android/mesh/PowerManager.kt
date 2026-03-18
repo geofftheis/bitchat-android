@@ -163,14 +163,14 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
 
     /**
      * Patch 39: Get low-power scan settings for mesh maintenance after joining/hosting a game.
-     * Uses BALANCED mode (~33% duty cycle) with STICKY matching to keep the mesh healthy
-     * while dedicating most radio time to game message throughput.
+     * Uses BALANCED mode (~33% duty cycle) with AGGRESSIVE matching to keep the mesh
+     * responsive to topology changes while dedicating most radio time to game message throughput.
      */
     fun getMeshMaintenanceScanSettings(): ScanSettings {
         return ScanSettings.Builder()
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
             .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
-            .setMatchMode(ScanSettings.MATCH_MODE_STICKY)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
             .setNumOfMatches(ScanSettings.MATCH_NUM_FEW_ADVERTISEMENT)
             .setReportDelay(0)
             .build()
