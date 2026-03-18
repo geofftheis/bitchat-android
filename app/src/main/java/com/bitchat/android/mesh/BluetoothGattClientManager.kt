@@ -73,6 +73,9 @@ class BluetoothGattClientManager(
     
     // State management
     private var isActive = false
+
+    // Patch 39: Allow disabling scanning for host devices to reduce BLE radio contention
+    var scanningEnabled = true
     
     /**
      * Start client manager
@@ -102,7 +105,9 @@ class BluetoothGattClientManager(
         isActive = true
         
         connectionScope.launch {
-            if (powerManager.shouldUseDutyCycle()) {
+            if (!scanningEnabled) {
+                Log.i(TAG, "Scanning disabled (host mode) — skipping BLE scan")
+            } else if (powerManager.shouldUseDutyCycle()) {
                 Log.i(TAG, "Using power-aware duty cycling")
             } else {
                 startScanning()
@@ -286,7 +291,7 @@ class BluetoothGattClientManager(
      * Stop scanning
      */
     @Suppress("DEPRECATION")
-    private fun stopScanning() {
+    fun stopScanning() {
         if (!permissionManager.hasBluetoothPermissions() || bleScanner == null) return
         
         if (isCurrentlyScanning) {

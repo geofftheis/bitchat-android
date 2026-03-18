@@ -71,6 +71,16 @@ class BluetoothMeshService(
         connectionManager.updateGameMetadata(metadataByte)
     }
 
+    /** Patch 39: Allow disabling scanning for host devices to reduce BLE radio contention. */
+    var scanningEnabled: Boolean
+        get() = connectionManager.scanningEnabled
+        set(value) { connectionManager.scanningEnabled = value }
+
+    /** Patch 39: Stop BLE scanning (e.g. after joiner connects to game). */
+    fun stopScanning() {
+        connectionManager.stopScanning()
+    }
+
     /** Patch 36: Forward advertising failure callback to connection manager. */
     var onAdvertisingFailed: ((Int) -> Unit)?
         get() = connectionManager.onAdvertisingFailed

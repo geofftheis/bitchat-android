@@ -88,6 +88,16 @@ class BluetoothConnectionManager(
     // Public property for address-peer mapping
     val addressPeerMap get() = connectionTracker.addressPeerMap
 
+    /** Patch 39: Allow disabling scanning for host devices to reduce BLE radio contention. */
+    var scanningEnabled: Boolean
+        get() = clientManager.scanningEnabled
+        set(value) { clientManager.scanningEnabled = value }
+
+    /** Patch 39: Stop BLE scanning (e.g. after joiner connects to game). */
+    fun stopScanning() {
+        clientManager.stopScanning()
+    }
+
     /** Patch 26: Update game metadata byte in BLE advertisement. */
     fun updateGameMetadata(metadataByte: Byte?) {
         serverManager.updateGameMetadata(metadataByte)
