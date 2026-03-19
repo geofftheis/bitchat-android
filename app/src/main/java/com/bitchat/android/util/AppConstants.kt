@@ -37,8 +37,15 @@ object AppConstants {
     }
 
     object Fragmentation {
-        const val FRAGMENT_SIZE_THRESHOLD: Int = 512
-        const val MAX_FRAGMENT_SIZE: Int = 469
+        // Half-Wit Patch 40: Reduced from 512/469 to 450/400.
+        // BLE GATT notifications are limited to MTU-3 bytes (514 with MTU 517).
+        // Each fragment is wrapped in a BitchatPacket with ~94 bytes of protocol
+        // overhead (version, type, TTL, timestamp, flags, payloadLength, senderID,
+        // recipientID, signature). The old values produced ~561-byte fragments
+        // that exceeded the 514-byte notification limit, causing silent delivery
+        // failures on server→client connections.
+        const val FRAGMENT_SIZE_THRESHOLD: Int = 450
+        const val MAX_FRAGMENT_SIZE: Int = 400
         const val FRAGMENT_TIMEOUT_MS: Long = 30_000L
         const val CLEANUP_INTERVAL_MS: Long = 10_000L
     }

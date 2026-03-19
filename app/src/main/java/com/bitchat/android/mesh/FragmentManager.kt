@@ -77,21 +77,25 @@ class FragmentManager {
         val fragmentID = FragmentPayload.generateFragmentID()
         
         // iOS: stride(from: 0, to: fullData.count, by: maxFragmentSize)
-        // Calculate dynamic fragment size to fit in MTU (512)
-        // Packet = Header + Sender + Recipient + Route + FragmentHeader + Payload + PaddingBuffer
+        // Half-Wit Patch 40: Calculate fragment size to fit within BLE notification limit.
+        // BLE GATT notifications are limited to MTU-3 bytes (514 with MTU 517).
+        // Each fragment becomes a full BitchatPacket with protocol overhead:
+        //   Header (v1=14, v2=16) + SenderID(8) + RecipientID(8) + Signature(64)
+        //   + FragmentHeader(13) + Route (if any)
         val hasRoute = packet.route != null
         val version = if (hasRoute) 2 else 1
-        val headerSize = if (version == 2) 15 else 13
+        val headerSize = if (version == 2) 16 else 14
         val senderSize = 8
         val recipientSize = if (packet.recipientID != null) 8 else 0
         // Route: 1 byte count + 8 bytes per hop
         val routeSize = if (hasRoute) (1 + (packet.route?.size ?: 0) * 8) else 0
         val fragmentHeaderSize = 13 // FragmentPayload header
-        val paddingBuffer = 16 // MessagePadding.optimalBlockSize adds 16 bytes overhead
+        val signatureSize = 64 // Ed25519 signature
 
-        // 512 - Overhead
-        val packetOverhead = headerSize + senderSize + recipientSize + routeSize + fragmentHeaderSize + paddingBuffer
-        val maxDataSize = (512 - packetOverhead).coerceAtMost(MAX_FRAGMENT_SIZE)
+        // 514 (MTU-3) - Overhead = max fragment data size
+        val maxNotificationSize = 514
+        val packetOverhead = headerSize + senderSize + recipientSize + routeSize + fragmentHeaderSize + signatureSize
+        val maxDataSize = (maxNotificationSize - packetOverhead).coerceAtMost(MAX_FRAGMENT_SIZE)
         
         if (maxDataSize <= 0) {
             Log.e(TAG, "❌ Calculated maxDataSize is non-positive ($maxDataSize). Route too large?")
