@@ -84,9 +84,28 @@ class BluetoothConnectionManager(
     
     // Delegate for callbacks
     var delegate: BluetoothConnectionManagerDelegate? = null
-    
+
     // Public property for address-peer mapping
     val addressPeerMap get() = connectionTracker.addressPeerMap
+
+    /** Patch 40: Host mode — disables scanning and outbound client connections. */
+    var hostMode: Boolean = false
+
+    /** Patch 40: Maximum outbound client connections. Default 10 (existing behavior).
+     *  Also propagated to clientManager for pre-connection limit checks. */
+    var maxClientConnections: Int = 10
+        set(value) {
+            field = value
+            clientManager.maxClientConnections = value
+        }
+
+    /** Patch 40: Maximum inbound server connections. Default 10 (existing behavior).
+     *  Also propagated to clientManager so its overall limit calculation stays consistent. */
+    var maxServerConnections: Int = 10
+        set(value) {
+            field = value
+            clientManager.maxServerConnections = value
+        }
 
     /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/AGGRESSIVE). */
     fun switchToMeshMaintenanceMode() {
@@ -121,16 +140,18 @@ class BluetoothConnectionManager(
         if (!isActive) return
 
         try {
-            // Use PowerManager defaults (debug overrides removed in Patch 16)
-            val maxOverall = powerManager.getMaxConnections()
-            val maxServer = maxOverall
-            val maxClient = maxOverall
+            // Patch 40: Use role-aware connection limits instead of PowerManager defaults.
+            // Host: 0 client, up to maxServerConnections server.
+            // Player: up to maxClientConnections client, up to maxServerConnections server.
+            val maxClient = if (hostMode) 0 else maxClientConnections
+            val maxServer = maxServerConnections
+            val maxOverall = maxClient + maxServer
 
             // Get list of connections to evict to satisfy all constraints
             val toEvict = connectionTracker.getConnectionsToEvict(maxOverall, maxServer, maxClient)
 
             if (toEvict.isNotEmpty()) {
-                Log.i(TAG, "Enforcing limits (max: $maxOverall, s: $maxServer, c: $maxClient) - evicting ${toEvict.size} connections")
+                Log.i(TAG, "Enforcing limits (max: $maxOverall, s: $maxServer, c: $maxClient, hostMode: $hostMode) - evicting ${toEvict.size} connections")
 
                 toEvict.forEach { conn ->
                     if (conn.isClient) {
@@ -193,14 +214,20 @@ class BluetoothConnectionManager(
                 }
                 Log.d(TAG, "GATT Server started")
 
-                if (!clientManager.start()) {
-                    Log.e(TAG, "Failed to start client manager")
-                    this@BluetoothConnectionManager.isActive = false
-                    return@launch
+                // Patch 40: Host mode skips client manager (no scanning, no outbound connections).
+                // Host only accepts inbound connections via the GATT server.
+                if (hostMode) {
+                    Log.i(TAG, "Host mode: skipping GATT Client (server-only)")
+                } else {
+                    if (!clientManager.start()) {
+                        Log.e(TAG, "Failed to start client manager")
+                        this@BluetoothConnectionManager.isActive = false
+                        return@launch
+                    }
+                    Log.d(TAG, "GATT Client started")
                 }
-                Log.d(TAG, "GATT Client started")
-                
-                Log.i(TAG, "Bluetooth services started successfully")
+
+                Log.i(TAG, "Bluetooth services started successfully (hostMode=$hostMode)")
             }
             
             return true

@@ -81,6 +81,22 @@ class BluetoothMeshService(
         connectionManager.stopScanning()
     }
 
+    /** Patch 40: Enable host mode — disables scanning and outbound client connections.
+     *  Must be set BEFORE calling startServices(). */
+    var hostMode: Boolean
+        get() = connectionManager.hostMode
+        set(value) { connectionManager.hostMode = value }
+
+    /** Patch 40: Set maximum outbound client connections (default 10). */
+    var maxClientConnections: Int
+        get() = connectionManager.maxClientConnections
+        set(value) { connectionManager.maxClientConnections = value }
+
+    /** Patch 40: Set maximum inbound server connections (default 10). */
+    var maxServerConnections: Int
+        get() = connectionManager.maxServerConnections
+        set(value) { connectionManager.maxServerConnections = value }
+
     /** Patch 36: Forward advertising failure callback to connection manager. */
     var onAdvertisingFailed: ((Int) -> Unit)?
         get() = connectionManager.onAdvertisingFailed

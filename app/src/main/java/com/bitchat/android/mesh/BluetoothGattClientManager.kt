@@ -77,6 +77,10 @@ class BluetoothGattClientManager(
     // Patch 39: Mesh-maintenance mode uses BALANCED/AGGRESSIVE scan settings instead of aggressive LOW_LATENCY.
     // Host devices start in this mode from transport init; joiners switch to it after joining.
     var meshMaintenanceMode = false
+
+    // Patch 40: Configurable connection limits set by the app layer.
+    var maxClientConnections: Int = 10
+    var maxServerConnections: Int = 10
     
     /**
      * Start client manager
@@ -362,9 +366,9 @@ class BluetoothGattClientManager(
             return
         }
         
-        // Check if connection limit is reached
-        val maxOverall = powerManager.getMaxConnections()
-        val maxClient = maxOverall
+        // Patch 40: Check configurable client connection limit instead of PowerManager default.
+        val maxClient = maxClientConnections
+        val maxOverall = maxClient + maxServerConnections
 
         if (!connectionTracker.canConnectAsClient(maxOverall, maxClient)) {
             Log.d(TAG, "Client connection limit reached (overall: $maxOverall, client: $maxClient)")
