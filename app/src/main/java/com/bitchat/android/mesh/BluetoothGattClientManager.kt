@@ -81,6 +81,11 @@ class BluetoothGattClientManager(
     // Patch 40: Configurable connection limits set by the app layer.
     var maxClientConnections: Int = 10
     var maxServerConnections: Int = 10
+
+    // Patch 41: Reserved slot — if set, one client connection slot is reserved for
+    // a peer whose peerID starts with this prefix. Non-matching peers can only fill
+    // (maxClientConnections - 1) slots until the reserved peer is connected.
+    var reservedPeerPrefix: String = ""
     
     /**
      * Start client manager
@@ -370,11 +375,25 @@ class BluetoothGattClientManager(
         val maxClient = maxClientConnections
         val maxOverall = maxClient + maxServerConnections
 
-        if (!connectionTracker.canConnectAsClient(maxOverall, maxClient)) {
-            Log.d(TAG, "Client connection limit reached (overall: $maxOverall, client: $maxClient)")
+        // Patch 41: Reserved slot logic — reserve one client slot for the host peerID.
+        // Non-host peers can only fill (maxClient - 1) slots until the reserved peer connects.
+        val effectiveMaxClient = if (reservedPeerPrefix.isNotEmpty() && maxClient > 1) {
+            val isReservedPeer = peerID != null && peerID.startsWith(reservedPeerPrefix)
+            val hostAlreadyConnected = connectionTracker.addressPeerMap.values.any { it.startsWith(reservedPeerPrefix) }
+            if (isReservedPeer || hostAlreadyConnected) {
+                maxClient // Full budget for the reserved peer, or if host already connected
+            } else {
+                maxClient - 1 // Reserve one slot for the host
+            }
+        } else {
+            maxClient
+        }
+
+        if (!connectionTracker.canConnectAsClient(maxOverall, effectiveMaxClient)) {
+            Log.d(TAG, "Client connection limit reached (overall: $maxOverall, client: $effectiveMaxClient)")
             return
         }
-        
+
         // Add pending connection and start connection
         if (connectionTracker.addPendingConnection(deviceAddress)) {
             connectToDevice(device, rssi, peerID)

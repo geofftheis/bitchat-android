@@ -97,6 +97,11 @@ class BluetoothMeshService(
         get() = connectionManager.maxServerConnections
         set(value) { connectionManager.maxServerConnections = value }
 
+    /** Patch 41: Reserved peer prefix — one client slot reserved for this peer. */
+    var reservedPeerPrefix: String
+        get() = connectionManager.reservedPeerPrefix
+        set(value) { connectionManager.reservedPeerPrefix = value }
+
     /** Patch 36: Forward advertising failure callback to connection manager. */
     var onAdvertisingFailed: ((Int) -> Unit)?
         get() = connectionManager.onAdvertisingFailed

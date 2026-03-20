@@ -107,6 +107,13 @@ class BluetoothConnectionManager(
             clientManager.maxServerConnections = value
         }
 
+    /** Patch 41: Reserved peer prefix — one client slot reserved for this peer. */
+    var reservedPeerPrefix: String = ""
+        set(value) {
+            field = value
+            clientManager.reservedPeerPrefix = value
+        }
+
     /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/AGGRESSIVE). */
     fun switchToMeshMaintenanceMode() {
         clientManager.switchToMeshMaintenanceMode()
