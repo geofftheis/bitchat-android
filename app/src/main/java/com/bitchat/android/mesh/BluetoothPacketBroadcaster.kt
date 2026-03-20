@@ -446,7 +446,7 @@ class BluetoothPacketBroadcaster(
      * Send data to a single device (server->client)
      */
     private fun notifyDevice(
-        device: BluetoothDevice, 
+        device: BluetoothDevice,
         data: ByteArray,
         gattServer: BluetoothGattServer?,
         characteristic: BluetoothGattCharacteristic?
@@ -454,7 +454,10 @@ class BluetoothPacketBroadcaster(
         return try {
             characteristic?.let { char ->
                 char.value = data
-                val result = gattServer?.notifyCharacteristicChanged(device, char, false) ?: false
+                // Patch 40: Use confirmed indications (true) instead of unconfirmed
+                // notifications (false). Indications are acknowledged by the receiver,
+                // preventing silent data loss on slow or congested devices.
+                val result = gattServer?.notifyCharacteristicChanged(device, char, true) ?: false
                 result
             } ?: false
         } catch (e: Exception) {

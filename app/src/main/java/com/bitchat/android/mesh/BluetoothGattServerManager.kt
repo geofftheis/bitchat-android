@@ -266,7 +266,10 @@ class BluetoothGattServerManager(
                     return
                 }
                 
-                if (BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)) {
+                // Patch 40: Accept both indication and notification subscription requests.
+                // We prefer indications (confirmed) but accept notifications for compatibility.
+                if (BluetoothGattDescriptor.ENABLE_INDICATION_VALUE.contentEquals(value) ||
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)) {
                     connectionTracker.addSubscribedDevice(device)
 
                     Log.d(TAG, "Server: Connection setup complete for ${device.address}")
@@ -305,13 +308,13 @@ class BluetoothGattServerManager(
         // Create new server
         gattServer = bluetoothManager.openGattServer(context, serverCallback)
         
-        // Create characteristic with notification support
+        // Create characteristic with indication support (Patch 40: confirmed delivery)
         characteristic = BluetoothGattCharacteristic(
             AppConstants.Mesh.Gatt.CHARACTERISTIC_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ or 
-            BluetoothGattCharacteristic.PROPERTY_WRITE or 
+            BluetoothGattCharacteristic.PROPERTY_READ or
+            BluetoothGattCharacteristic.PROPERTY_WRITE or
             BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PROPERTY_INDICATE,
             BluetoothGattCharacteristic.PERMISSION_READ or 
             BluetoothGattCharacteristic.PERMISSION_WRITE
         )

@@ -471,10 +471,13 @@ class BluetoothGattClientManager(
                                 Log.d(TAG, "Client: Updated device connection with characteristic for $deviceAddress")
                             }
                             
+                            // Patch 40: Subscribe to indications (confirmed delivery) instead of
+                            // unconfirmed notifications. setCharacteristicNotification enables
+                            // local delivery for both notifications and indications.
                             gatt.setCharacteristicNotification(characteristic, true)
                             val descriptor = characteristic.getDescriptor(AppConstants.Mesh.Gatt.DESCRIPTOR_UUID)
                             if (descriptor != null) {
-                                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                                descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
                                 gatt.writeDescriptor(descriptor)
                                 
                                 connectionScope.launch {
