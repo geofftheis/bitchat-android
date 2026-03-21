@@ -377,18 +377,17 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
     }
     
     /**
-     * Handle broadcast message with verification enforcement
+     * Handle broadcast message
      */
     private suspend fun handleBroadcastMessage(routed: RoutedPacket) {
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
-        
-        // Enforce: only accept public messages from verified peers we know
+
+        // Accept messages from all peers — game layer validates via gameId/player list.
+        // Previously dropped messages from unverified peers, but this caused a race
+        // condition: game messages arriving before the peer's announce was fully
+        // processed would be dropped, then relayed copies rejected as duplicates.
         val peerInfo = delegate?.getPeerInfo(peerID)
-        if (peerInfo == null || !peerInfo.isVerifiedNickname) {
-            Log.w(TAG, "🚫 Dropping public message from unverified or unknown peer ${peerID.take(8)}...")
-            return
-        }
         
         try {
             // Try file packet first (voice, image, etc.) and log outcome for FILE_TRANSFER
