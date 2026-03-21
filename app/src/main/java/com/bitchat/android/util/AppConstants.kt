@@ -7,7 +7,7 @@ import java.util.UUID
  */
 object AppConstants {
     // Packet time-to-live (hops)
-    val MESSAGE_TTL_HOPS: UByte = 1u     // Half-Wit Patch 7: TTL=1 disables relay forwarding (all 8 players are directly connected)
+    val MESSAGE_TTL_HOPS: UByte = 2u     // Half-Wit Patch 43: TTL=2 allows one relay hop for join reliability (was TTL=1 in Patch 7)
     val SYNC_TTL_HOPS: UByte = 0u        // TTL for neighbor-only sync packets
 
     object Mesh {

@@ -342,7 +342,16 @@ class BluetoothGattClientManager(
         val peerID = if (serviceData != null && serviceData.size >= 8) {
             serviceData.joinToString("") { "%02x".format(it) }
         } else {
-            null
+            // Patch 43: Fallback — extract peerID prefix from iOS local name format
+            // iOS hosts advertise "H" + 2-hex metadata + 8-hex peerID prefix (11 chars total)
+            val deviceName = scanRecord?.deviceName
+            if (deviceName != null && deviceName.length == 11 && deviceName.startsWith("H")) {
+                try {
+                    deviceName.substring(3, 11).lowercase()
+                } catch (_: Exception) { null }
+            } else {
+                null
+            }
         }
 
         if (peerID != null) {
@@ -370,7 +379,9 @@ class BluetoothGattClientManager(
         }
         
         // Check if connection attempt is allowed
-        if (!connectionTracker.isConnectionAttemptAllowed(deviceAddress)) {
+        // Patch 43: Bypass cooldown for the reserved (host) peer — join reliability is critical.
+        val isReservedDevice = reservedPeerPrefix.isNotEmpty() && peerID != null && peerID.startsWith(reservedPeerPrefix)
+        if (!isReservedDevice && !connectionTracker.isConnectionAttemptAllowed(deviceAddress)) {
             Log.d(TAG, "Connection to $deviceAddress not allowed due to recent attempts")
             return
         }
