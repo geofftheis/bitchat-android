@@ -508,6 +508,26 @@ class BluetoothMeshService(
                         val isDirect = routed.packet.ttl == com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS
                         
                         if (isDirect) {
+                            // Patch 43: Duplicate connection prevention.
+                            // If we already have a client connection to this peer, disconnect
+                            // the new inbound server connection to avoid wasting connection budget.
+                            val existingEntry = connectionManager.addressPeerMap.entries.find { it.value == pid && it.key != deviceAddress }
+                            if (existingEntry != null) {
+                                val existingConn = connectionManager.getConnectedDeviceEntries().find { it.first == existingEntry.key }
+                                val newConn = connectionManager.getConnectedDeviceEntries().find { it.first == deviceAddress }
+                                // If we're client on the existing connection and server on the new one, drop the new (server) one
+                                if (existingConn?.second == true && newConn?.second == false) {
+                                    Log.i(TAG, "Patch 43: Dropping duplicate server connection to peer $pid at $deviceAddress (already connected as client via ${existingEntry.key})")
+                                    connectionManager.disconnectAddress(deviceAddress)
+                                    return@launch
+                                }
+                                // If we're server on the existing and client on the new, drop the existing (server) one
+                                if (existingConn?.second == false && newConn?.second == true) {
+                                    Log.i(TAG, "Patch 43: Dropping duplicate server connection to peer $pid at ${existingEntry.key} (new client connection via $deviceAddress)")
+                                    connectionManager.disconnectAddress(existingEntry.key)
+                                }
+                            }
+
                             // Bind or rebind this device address to the announcing peer
                             connectionManager.addressPeerMap[deviceAddress] = pid
                             Log.d(TAG, "Mapped device $deviceAddress to peer $pid (TTL=${routed.packet.ttl})")
