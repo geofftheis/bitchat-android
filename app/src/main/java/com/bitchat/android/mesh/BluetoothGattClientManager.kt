@@ -86,7 +86,11 @@ class BluetoothGattClientManager(
     // a peer whose peerID starts with this prefix. Non-matching peers can only fill
     // (maxClientConnections - 1) slots until the reserved peer is connected.
     var reservedPeerPrefix: String = ""
-    
+
+    // Patch 42: Callback invoked when a GATT write to a remote server completes.
+    // Wired to BluetoothPacketBroadcaster.onWriteAcknowledged by the connection manager.
+    var onCharacteristicWriteComplete: ((deviceAddress: String, status: Int) -> Unit)? = null
+
     /**
      * Start client manager
      */
@@ -566,6 +570,12 @@ class BluetoothGattClientManager(
                         }
                     }
                 }
+            }
+
+            // Patch 42: Notify when a GATT write completes, unblocking the broadcaster's
+            // writeToDeviceConnAndAwaitAck for the next write (e.g., next fragment).
+            override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                onCharacteristicWriteComplete?.invoke(gatt.device.address, status)
             }
 
             override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {

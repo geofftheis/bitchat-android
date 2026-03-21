@@ -85,6 +85,11 @@ class BluetoothConnectionManager(
         serverManager.onIndicationSent = { deviceAddress, status ->
             packetBroadcaster.onIndicationAcknowledged(deviceAddress, status)
         }
+        // Patch 42: Wire GATT write callback from client manager to packet broadcaster
+        // so the broadcaster knows when it's safe to send the next write.
+        clientManager.onCharacteristicWriteComplete = { deviceAddress, status ->
+            packetBroadcaster.onWriteAcknowledged(deviceAddress, status)
+        }
     }
 
     // Service state

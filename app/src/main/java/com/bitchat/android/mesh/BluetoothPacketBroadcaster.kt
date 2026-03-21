@@ -100,6 +100,10 @@ class BluetoothPacketBroadcaster(
     // before we can send the next one. This map holds a deferred per device address
     // that is completed when onNotificationSent fires from the GATT server callback.
     private val pendingIndicationAcks = ConcurrentHashMap<String, CompletableDeferred<Int>>()
+
+    // Patch 42: Per-device GATT write acknowledgment tracking (client→server path).
+    // Same principle as indications: only one outstanding writeCharacteristic per connection.
+    private val pendingWriteAcks = ConcurrentHashMap<String, CompletableDeferred<Int>>()
     
     // SERIALIZATION: Actor to serialize all broadcast operations
     @OptIn(kotlinx.coroutines.ObsoleteCoroutinesApi::class)
@@ -123,6 +127,14 @@ class BluetoothPacketBroadcaster(
      */
     fun onIndicationAcknowledged(deviceAddress: String, status: Int) {
         pendingIndicationAcks.remove(deviceAddress)?.complete(status)
+    }
+
+    /**
+     * Patch 42: Called by BluetoothGattClientManager when onCharacteristicWrite fires.
+     * Completes the pending deferred for the given device, unblocking the sender.
+     */
+    fun onWriteAcknowledged(deviceAddress: String, status: Int) {
+        pendingWriteAcks.remove(deviceAddress)?.complete(status)
     }
 
     /**
@@ -391,7 +403,7 @@ class BluetoothPacketBroadcaster(
                 
                 if (clientTarget != null) {
                     Log.d(TAG, "Source Routing: sending directly to first hop (client conn) $firstHop: ${clientTarget.device.address}")
-                    if (writeToDeviceConn(clientTarget, data)) {
+                    if (writeToDeviceConnAndAwaitAck(clientTarget, data)) {
                         val toPeer = connectionTracker.addressPeerMap[clientTarget.device.address]
                         logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, clientTarget.device.address, packet.ttl, packet.version, routeInfo)
                         sent = true
@@ -428,7 +440,7 @@ class BluetoothPacketBroadcaster(
             // If found, send directly
             if (targetDeviceConn != null) {
                 Log.d(TAG, "Send packet type ${packet.type} directly to target client connection for recipient $recipientID: ${targetDeviceConn.device.address}")
-                if (writeToDeviceConn(targetDeviceConn, data)) {
+                if (writeToDeviceConnAndAwaitAck(targetDeviceConn, data)) {
                     val toPeer = connectionTracker.addressPeerMap[targetDeviceConn.device.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, targetDeviceConn.device.address, packet.ttl, packet.version, routeInfo)
                     return  // Sent, no need to continue
@@ -464,6 +476,8 @@ class BluetoothPacketBroadcaster(
         }
         
         // Send to client connections (GATT servers we are connected to)
+        // Patch 42: Use writeToDeviceConnAndAwaitAck to wait for each GATT write's
+        // onCharacteristicWrite callback, preventing silent fragment drops.
         connectedDevices.values.forEach { deviceConn ->
             if (deviceConn.isClient && deviceConn.gatt != null && deviceConn.characteristic != null) {
                 if (deviceConn.device.address == routed.relayAddress) {
@@ -474,7 +488,7 @@ class BluetoothPacketBroadcaster(
                     Log.d(TAG, "Skipping roadcast to server back to sender: ${deviceConn.device.address}")
                     return@forEach
                 }
-                val sent = writeToDeviceConn(deviceConn, data)
+                val sent = writeToDeviceConnAndAwaitAck(deviceConn, data)
                 if (sent) {
                     val toPeer = connectionTracker.addressPeerMap[deviceConn.device.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, deviceConn.device.address, packet.ttl, packet.version, routeInfo)
@@ -557,10 +571,11 @@ class BluetoothPacketBroadcaster(
     }
 
     /**
-     * Send data to a single device (client->server)
+     * Send data to a single device (client->server) - fire-and-forget.
+     * Used by sendToPeer and other non-fragment paths where ack waiting is not needed.
      */
     private fun writeToDeviceConn(
-        deviceConn: BluetoothConnectionTracker.DeviceConnection, 
+        deviceConn: BluetoothConnectionTracker.DeviceConnection,
         data: ByteArray
     ): Boolean {
         return try {
@@ -575,6 +590,43 @@ class BluetoothPacketBroadcaster(
             Log.w(TAG, "Error sending to client connection ${deviceConn.device.address}: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Patch 42: Send GATT write to device and wait for onCharacteristicWrite callback.
+     *
+     * Same principle as notifyDeviceAndAwaitAck but for the client→server path.
+     * Android's BLE stack only allows one outstanding writeCharacteristic per connection.
+     * Calling it again before onCharacteristicWrite fires returns false and silently drops
+     * the data.
+     */
+    private suspend fun writeToDeviceConnAndAwaitAck(
+        deviceConn: BluetoothConnectionTracker.DeviceConnection,
+        data: ByteArray
+    ): Boolean {
+        val address = deviceConn.device.address
+        repeat(4) { attempt ->
+            val ackDeferred = CompletableDeferred<Int>()
+            pendingWriteAcks[address] = ackDeferred
+
+            val sent = writeToDeviceConn(deviceConn, data)
+            if (sent) {
+                val status = withTimeoutOrNull(500) { ackDeferred.await() }
+                pendingWriteAcks.remove(address)
+                if (status != null) {
+                    return true
+                }
+                Log.w(TAG, "Patch 42: Write ack timeout for $address (attempt ${attempt + 1}/4)")
+            } else {
+                pendingWriteAcks.remove(address)
+                if (attempt < 3) {
+                    Log.d(TAG, "Patch 42: GATT write busy for $address, retrying (attempt ${attempt + 1}/4)")
+                    delay(50)
+                }
+            }
+        }
+        Log.w(TAG, "Patch 42: Failed to deliver GATT write to $address after 4 attempts")
+        return false
     }
     
     /**
