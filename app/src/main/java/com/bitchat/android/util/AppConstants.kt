@@ -16,7 +16,7 @@ object AppConstants {
         const val PEER_CLEANUP_INTERVAL_MS: Long = 60_000L
 
         // BLE connection tracking
-        const val CONNECTION_RETRY_DELAY_MS: Long = 2_500L  // Half-Wit Patch 43: Reduced from 5s to 2.5s for faster mesh healing in small games
+        const val CONNECTION_RETRY_DELAY_MS: Long = 2_000L  // Half-Wit Patch 43: Reduced from 5s to 2s to match iOS backoff
         const val MAX_CONNECTION_ATTEMPTS: Int = 3
         const val CONNECTION_CLEANUP_DELAY_MS: Long = 500L
         const val CONNECTION_CLEANUP_INTERVAL_MS: Long = 30_000L
