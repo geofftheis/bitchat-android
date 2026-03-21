@@ -61,6 +61,10 @@ class BluetoothGattServerManager(
     // Bit 7: locked flag, Bits 0-3: player count
     var gameMetadataByte: Byte? = null
 
+    // Patch 42: Callback invoked when an indication is acknowledged by a remote device.
+    // Wired to BluetoothPacketBroadcaster.onIndicationAcknowledged by the connection manager.
+    var onIndicationSent: ((deviceAddress: String, status: Int) -> Unit)? = null
+
     // Patch 36: Callback invoked when advertising fails after all retry attempts.
     // Allows the consuming app to detect slot exhaustion and notify the user.
     var onAdvertisingFailed: ((Int) -> Unit)? = null
@@ -285,8 +289,15 @@ class BluetoothGattServerManager(
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                 }
             }
+
+            // Patch 42: Notify when an indication has been acknowledged by the remote device.
+            // This unblocks the broadcaster's notifyDeviceAndAwaitAck, allowing the next
+            // indication (e.g., next fragment) to be sent.
+            override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+                onIndicationSent?.invoke(device.address, status)
+            }
         }
-        
+
         // Proper cleanup sequencing to prevent race conditions
         gattServer?.let { server ->
             Log.d(TAG, "Cleaning up existing GATT server")

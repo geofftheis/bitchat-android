@@ -78,7 +78,15 @@ class BluetoothConnectionManager(
     private val clientManager = BluetoothGattClientManager(
         context, connectionScope, connectionTracker, permissionManager, powerManager, componentDelegate, serviceUuid
     )
-    
+
+    init {
+        // Patch 42: Wire indication ack callback from GATT server to packet broadcaster
+        // so the broadcaster knows when it's safe to send the next indication.
+        serverManager.onIndicationSent = { deviceAddress, status ->
+            packetBroadcaster.onIndicationAcknowledged(deviceAddress, status)
+        }
+    }
+
     // Service state
     private var isActive = false
     

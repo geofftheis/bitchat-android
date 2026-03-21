@@ -10,6 +10,7 @@ import com.bitchat.android.protocol.SpecialRecipients
 import com.bitchat.android.model.RoutedPacket
 import com.bitchat.android.protocol.MessageType
 import com.bitchat.android.util.toHexString
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.channels.actor
 
@@ -85,12 +87,19 @@ class BluetoothPacketBroadcaster(
     private data class BroadcastRequest(
         val routed: RoutedPacket,
         val gattServer: BluetoothGattServer?,
-        val characteristic: BluetoothGattCharacteristic?
+        val characteristic: BluetoothGattCharacteristic?,
+        val completion: CompletableDeferred<Unit>? = null  // Patch 42: optional sync signal
     )
     
     // Actor scope for the broadcaster
     private val broadcasterScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val transferJobs = ConcurrentHashMap<String, Job>()
+
+    // Patch 42: Per-device indication acknowledgment tracking.
+    // When we send a BLE indication (confirm=true), the receiver must acknowledge it
+    // before we can send the next one. This map holds a deferred per device address
+    // that is completed when onNotificationSent fires from the GATT server callback.
+    private val pendingIndicationAcks = ConcurrentHashMap<String, CompletableDeferred<Int>>()
     
     // SERIALIZATION: Actor to serialize all broadcast operations
     @OptIn(kotlinx.coroutines.ObsoleteCoroutinesApi::class)
@@ -101,12 +110,41 @@ class BluetoothPacketBroadcaster(
         try {
             for (request in channel) {
                 broadcastSinglePacketInternal(request.routed, request.gattServer, request.characteristic)
+                request.completion?.complete(Unit)  // Patch 42: signal sync callers
             }
         } finally {
             Log.d(TAG, "🎭 Packet broadcaster actor terminated")
         }
     }
     
+    /**
+     * Patch 42: Called by BluetoothGattServerManager when onNotificationSent fires.
+     * Completes the pending deferred for the given device, unblocking the sender.
+     */
+    fun onIndicationAcknowledged(deviceAddress: String, status: Int) {
+        pendingIndicationAcks.remove(deviceAddress)?.complete(status)
+    }
+
+    /**
+     * Patch 42: Synchronous broadcast that waits for the actor to finish processing
+     * (including indication ack waiting) before returning. Used by the fragment loop
+     * to ensure each fragment is fully delivered before sending the next.
+     */
+    suspend fun broadcastSinglePacketSync(
+        routed: RoutedPacket,
+        gattServer: BluetoothGattServer?,
+        characteristic: BluetoothGattCharacteristic?
+    ) {
+        val completion = CompletableDeferred<Unit>()
+        try {
+            broadcasterActor.send(BroadcastRequest(routed, gattServer, characteristic, completion))
+            completion.await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Patch 42: Failed to send sync broadcast to actor: ${e.message}")
+            broadcastSinglePacketInternal(routed, gattServer, characteristic)
+        }
+    }
+
     fun broadcastPacket(
         routed: RoutedPacket,
         gattServer: BluetoothGattServer?,
@@ -144,9 +182,10 @@ class BluetoothPacketBroadcaster(
                         if (!isActive) return@launch
                         // If cancelled, stop sending remaining fragments
                         if (transferId != null && transferJobs[transferId]?.isCancelled == true) return@launch
-                        broadcastSinglePacket(RoutedPacket(fragment, transferId = transferId), gattServer, characteristic)
-                        // 20ms delay between fragments
-                        delay(20)
+                        // Patch 42: Use synchronous broadcast that waits for indication
+                        // acks before sending next fragment. Replaces blind delay(20)
+                        // which was too short for BLE indication round-trips on slow devices.
+                        broadcastSinglePacketSync(RoutedPacket(fragment, transferId = transferId), gattServer, characteristic)
                         if (transferId != null) {
                             sent += 1
                             TransferProgressManager.progress(transferId, sent, fragments.size)
@@ -338,7 +377,7 @@ class BluetoothPacketBroadcaster(
             
             if (serverTarget != null) {
                 Log.d(TAG, "Source Routing: sending directly to first hop (server conn) $firstHop: ${serverTarget.address}")
-                if (notifyDevice(serverTarget, data, gattServer, characteristic)) {
+                if (notifyDeviceAndAwaitAck(serverTarget, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[serverTarget.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, serverTarget.address, packet.ttl, packet.version, routeInfo)
                     sent = true
@@ -375,7 +414,7 @@ class BluetoothPacketBroadcaster(
             // If found, send directly
             if (targetDevice != null) {
                 Log.d(TAG, "Send packet type ${packet.type} directly to target device for recipient $recipientID: ${targetDevice.address}")
-                if (notifyDevice(targetDevice, data, gattServer, characteristic)) {
+                if (notifyDeviceAndAwaitAck(targetDevice, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[targetDevice.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, targetDevice.address, packet.ttl, packet.version, routeInfo)
                     return  // Sent, no need to continue
@@ -406,6 +445,8 @@ class BluetoothPacketBroadcaster(
         val senderID = packet.senderID.toHexString()
         
         // Send to server connections (devices connected to our GATT server)
+        // Patch 42: Use notifyDeviceAndAwaitAck to wait for each indication's
+        // BLE-level acknowledgment, preventing silent fragment drops on slow devices.
         subscribedDevices.forEach { device ->
             if (device.address == routed.relayAddress) {
                 Log.d(TAG, "Skipping broadcast to client back to relayer: ${device.address}")
@@ -415,7 +456,7 @@ class BluetoothPacketBroadcaster(
                 Log.d(TAG, "Skipping broadcast to client back to sender: ${device.address}")
                 return@forEach
             }
-            val sent = notifyDevice(device, data, gattServer, characteristic)
+            val sent = notifyDeviceAndAwaitAck(device, data, gattServer, characteristic)
             if (sent) {
                 val toPeer = connectionTracker.addressPeerMap[device.address]
                 logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, device.address, packet.ttl, packet.version, routeInfo)
@@ -443,7 +484,8 @@ class BluetoothPacketBroadcaster(
     }
     
     /**
-     * Send data to a single device (server->client)
+     * Send data to a single device (server->client) - fire-and-forget.
+     * Used by sendToPeer and other non-fragment paths where ack waiting is not needed.
      */
     private fun notifyDevice(
         device: BluetoothDevice,
@@ -471,6 +513,47 @@ class BluetoothPacketBroadcaster(
             Log.w(TAG, "Error sending to server connection ${device.address}: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Patch 42: Send indication to device and wait for BLE-level acknowledgment.
+     *
+     * With BLE indications (confirm=true, Patch 40b), only one indication can be
+     * outstanding per connection. If we send another before the previous is acked,
+     * notifyCharacteristicChanged returns false and the data is silently dropped.
+     * This method waits for the onNotificationSent callback (via pendingIndicationAcks)
+     * before returning, ensuring reliable sequential delivery.
+     */
+    private suspend fun notifyDeviceAndAwaitAck(
+        device: BluetoothDevice,
+        data: ByteArray,
+        gattServer: BluetoothGattServer?,
+        characteristic: BluetoothGattCharacteristic?
+    ): Boolean {
+        repeat(4) { attempt ->
+            val ackDeferred = CompletableDeferred<Int>()
+            pendingIndicationAcks[device.address] = ackDeferred
+
+            val sent = notifyDevice(device, data, gattServer, characteristic)
+            if (sent) {
+                // Wait for onNotificationSent callback (up to 500ms)
+                val status = withTimeoutOrNull(500) { ackDeferred.await() }
+                pendingIndicationAcks.remove(device.address)
+                if (status != null) {
+                    return true
+                }
+                Log.w(TAG, "Patch 42: Indication ack timeout for ${device.address} (attempt ${attempt + 1}/4)")
+            } else {
+                pendingIndicationAcks.remove(device.address)
+                if (attempt < 3) {
+                    // BLE stack busy (previous indication still pending) - wait and retry
+                    Log.d(TAG, "Patch 42: BLE busy for ${device.address}, retrying (attempt ${attempt + 1}/4)")
+                    delay(50)
+                }
+            }
+        }
+        Log.w(TAG, "Patch 42: Failed to deliver indication to ${device.address} after 4 attempts")
+        return false
     }
 
     /**
