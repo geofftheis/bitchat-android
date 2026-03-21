@@ -496,13 +496,23 @@ class BluetoothGattClientManager(
                             gatt.setCharacteristicNotification(characteristic, true)
                             val descriptor = characteristic.getDescriptor(AppConstants.Mesh.Gatt.DESCRIPTOR_UUID)
                             if (descriptor != null) {
+                                // Patch 40c: Write CCCD descriptor and wait for confirmed
+                                // callback before declaring connection ready. A safety timeout
+                                // disconnects if the callback never fires.
                                 descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-                                gatt.writeDescriptor(descriptor)
-                                
-                                connectionScope.launch {
-                                    delay(200)
-                                    Log.i(TAG, "Client: Connection setup complete for $deviceAddress")
-                                    delegate?.onDeviceConnected(device)
+                                val writeOk = gatt.writeDescriptor(descriptor)
+                                if (!writeOk) {
+                                    Log.w(TAG, "Client: writeDescriptor returned false for $deviceAddress, disconnecting")
+                                    gatt.disconnect()
+                                } else {
+                                    // Safety timeout: if onDescriptorWrite never fires, disconnect
+                                    connectionScope.launch {
+                                        delay(3000)
+                                        if (connectionTracker.getDeviceConnection(deviceAddress)?.descriptorWriteConfirmed != true) {
+                                            Log.w(TAG, "Client: Descriptor write timeout for $deviceAddress, disconnecting")
+                                            gatt.disconnect()
+                                        }
+                                    }
                                 }
                             } else {
                                 Log.e(TAG, "Client: CCCD descriptor not found for $deviceAddress")
@@ -536,6 +546,28 @@ class BluetoothGattClientManager(
                 }
             }
             
+            // Patch 40c: Confirm indication subscription before declaring connection ready.
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                val addr = gatt.device.address
+                if (descriptor.uuid == AppConstants.Mesh.Gatt.DESCRIPTOR_UUID) {
+                    if (status == BluetoothGatt.GATT_SUCCESS) {
+                        Log.i(TAG, "Client: Indication subscription confirmed for $addr")
+                        connectionTracker.getDeviceConnection(addr)?.let { conn ->
+                            connectionTracker.updateDeviceConnection(addr, conn.copy(descriptorWriteConfirmed = true))
+                        }
+                        delegate?.onDeviceConnected(device)
+                    } else {
+                        Log.w(TAG, "Client: Descriptor write failed (status=$status) for $addr, retrying...")
+                        // Retry once — if it fails again the safety timeout will disconnect
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                        if (!gatt.writeDescriptor(descriptor)) {
+                            Log.e(TAG, "Client: Retry writeDescriptor returned false for $addr, disconnecting")
+                            gatt.disconnect()
+                        }
+                    }
+                }
+            }
+
             override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
                 val deviceAddress = gatt.device.address
                 if (status == BluetoothGatt.GATT_SUCCESS) {

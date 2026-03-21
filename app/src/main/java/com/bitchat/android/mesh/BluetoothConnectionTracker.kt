@@ -49,7 +49,8 @@ class BluetoothConnectionTracker(
         val rssi: Int = Int.MIN_VALUE,
         val isClient: Boolean = false,
         val connectedAt: Long = System.currentTimeMillis(),
-        val peerID: String? = null
+        val peerID: String? = null,
+        val descriptorWriteConfirmed: Boolean = false  // Patch 40c
     )
     
     /**
