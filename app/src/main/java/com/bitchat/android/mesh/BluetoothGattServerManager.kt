@@ -336,7 +336,7 @@ class BluetoothGattServerManager(
             BluetoothGattCharacteristic.PROPERTY_READ or
             BluetoothGattCharacteristic.PROPERTY_WRITE or
             BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or
-            BluetoothGattCharacteristic.PROPERTY_INDICATE,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ or 
             BluetoothGattCharacteristic.PERMISSION_WRITE
         )

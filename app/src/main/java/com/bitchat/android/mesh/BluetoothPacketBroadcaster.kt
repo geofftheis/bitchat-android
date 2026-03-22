@@ -194,10 +194,11 @@ class BluetoothPacketBroadcaster(
                         if (!isActive) return@launch
                         // If cancelled, stop sending remaining fragments
                         if (transferId != null && transferJobs[transferId]?.isCancelled == true) return@launch
-                        // Patch 42: Use synchronous broadcast that waits for indication
-                        // acks before sending next fragment. Replaces blind delay(20)
-                        // which was too short for BLE indication round-trips on slow devices.
-                        broadcastSinglePacketSync(RoutedPacket(fragment, transferId = transferId), gattServer, characteristic)
+                        // Revert Patch 42: With notifications (fire-and-forget), a small
+                        // delay between fragments is sufficient. The original 20ms was fine
+                        // now that fragment sizes are correct (Patches 40,47,49).
+                        broadcastSinglePacket(RoutedPacket(fragment, transferId = transferId), gattServer, characteristic)
+                        delay(20)
                         if (transferId != null) {
                             sent += 1
                             TransferProgressManager.progress(transferId, sent, fragments.size)
@@ -399,7 +400,7 @@ class BluetoothPacketBroadcaster(
             
             if (serverTarget != null) {
                 Log.d(TAG, "Source Routing: sending directly to first hop (server conn) $firstHop: ${serverTarget.address}")
-                if (notifyDeviceAndAwaitAck(serverTarget, data, gattServer, characteristic)) {
+                if (notifyDevice(serverTarget, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[serverTarget.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, serverTarget.address, packet.ttl, packet.version, routeInfo)
                     sent = true
@@ -410,10 +411,10 @@ class BluetoothPacketBroadcaster(
             if (!sent) {
                 val clientTarget = connectionTracker.getConnectedDevices().values
                     .firstOrNull { connectionTracker.addressPeerMap[it.device.address] == firstHop }
-                
+
                 if (clientTarget != null) {
                     Log.d(TAG, "Source Routing: sending directly to first hop (client conn) $firstHop: ${clientTarget.device.address}")
-                    if (writeToDeviceConnAndAwaitAck(clientTarget, data)) {
+                    if (writeToDeviceConn(clientTarget, data)) {
                         val toPeer = connectionTracker.addressPeerMap[clientTarget.device.address]
                         logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, clientTarget.device.address, packet.ttl, packet.version, routeInfo)
                         sent = true
@@ -436,7 +437,7 @@ class BluetoothPacketBroadcaster(
             // If found, send directly
             if (targetDevice != null) {
                 Log.d(TAG, "Send packet type ${packet.type} directly to target device for recipient $recipientID: ${targetDevice.address}")
-                if (notifyDeviceAndAwaitAck(targetDevice, data, gattServer, characteristic)) {
+                if (notifyDevice(targetDevice, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[targetDevice.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, targetDevice.address, packet.ttl, packet.version, routeInfo)
                     return  // Sent, no need to continue
@@ -446,11 +447,11 @@ class BluetoothPacketBroadcaster(
             // Try to find the recipient in client connections (connectedDevices)
             val targetDeviceConn = connectionTracker.getConnectedDevices().values
                 .firstOrNull { connectionTracker.addressPeerMap[it.device.address] == recipientID }
-            
+
             // If found, send directly
             if (targetDeviceConn != null) {
                 Log.d(TAG, "Send packet type ${packet.type} directly to target client connection for recipient $recipientID: ${targetDeviceConn.device.address}")
-                if (writeToDeviceConnAndAwaitAck(targetDeviceConn, data)) {
+                if (writeToDeviceConn(targetDeviceConn, data)) {
                     val toPeer = connectionTracker.addressPeerMap[targetDeviceConn.device.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, targetDeviceConn.device.address, packet.ttl, packet.version, routeInfo)
                     return  // Sent, no need to continue
@@ -467,8 +468,6 @@ class BluetoothPacketBroadcaster(
         val senderID = packet.senderID.toHexString()
         
         // Send to server connections (devices connected to our GATT server)
-        // Patch 42: Use notifyDeviceAndAwaitAck to wait for each indication's
-        // BLE-level acknowledgment, preventing silent fragment drops on slow devices.
         subscribedDevices.forEach { device ->
             if (device.address == routed.relayAddress) {
                 Log.d(TAG, "Skipping broadcast to client back to relayer: ${device.address}")
@@ -478,16 +477,14 @@ class BluetoothPacketBroadcaster(
                 Log.d(TAG, "Skipping broadcast to client back to sender: ${device.address}")
                 return@forEach
             }
-            val sent = notifyDeviceAndAwaitAck(device, data, gattServer, characteristic)
+            val sent = notifyDevice(device, data, gattServer, characteristic)
             if (sent) {
                 val toPeer = connectionTracker.addressPeerMap[device.address]
                 logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, device.address, packet.ttl, packet.version, routeInfo)
             }
         }
-        
+
         // Send to client connections (GATT servers we are connected to)
-        // Patch 42: Use writeToDeviceConnAndAwaitAck to wait for each GATT write's
-        // onCharacteristicWrite callback, preventing silent fragment drops.
         connectedDevices.values.forEach { deviceConn ->
             if (deviceConn.isClient && deviceConn.gatt != null && deviceConn.characteristic != null) {
                 if (deviceConn.device.address == routed.relayAddress) {
@@ -498,7 +495,7 @@ class BluetoothPacketBroadcaster(
                     Log.d(TAG, "Skipping roadcast to server back to sender: ${deviceConn.device.address}")
                     return@forEach
                 }
-                val sent = writeToDeviceConnAndAwaitAck(deviceConn, data)
+                val sent = writeToDeviceConn(deviceConn, data)
                 if (sent) {
                     val toPeer = connectionTracker.addressPeerMap[deviceConn.device.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, deviceConn.device.address, packet.ttl, packet.version, routeInfo)
@@ -520,10 +517,12 @@ class BluetoothPacketBroadcaster(
         return try {
             characteristic?.let { char ->
                 char.value = data
-                // Patch 40: Use confirmed indications (true) instead of unconfirmed
-                // notifications (false). Indications are acknowledged by the receiver,
-                // preventing silent data loss on slow or congested devices.
-                val result = gattServer?.notifyCharacteristicChanged(device, char, true) ?: false
+                // Revert Patch 40b: Use fire-and-forget notifications (false) instead of
+                // confirmed indications (true). The original packet drop issues were caused
+                // by fragment size bugs (Patches 40,47,49) and connection tracking races
+                // (Patches 44,45,46), not BLE notification unreliability. Indications
+                // serialized all sends and caused 4-8x throughput reduction.
+                val result = gattServer?.notifyCharacteristicChanged(device, char, false) ?: false
                 result
             } ?: false
         } catch (e: Exception) {

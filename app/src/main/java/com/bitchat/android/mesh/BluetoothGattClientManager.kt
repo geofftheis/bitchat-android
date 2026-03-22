@@ -537,7 +537,7 @@ class BluetoothGattClientManager(
                                 // Patch 40c: Write CCCD descriptor and wait for confirmed
                                 // callback before declaring connection ready. A safety timeout
                                 // disconnects if the callback never fires.
-                                descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                                 val writeOk = gatt.writeDescriptor(descriptor)
                                 if (!writeOk) {
                                     Log.w(TAG, "Client: writeDescriptor returned false for $deviceAddress, disconnecting")
@@ -597,7 +597,7 @@ class BluetoothGattClientManager(
                     } else {
                         Log.w(TAG, "Client: Descriptor write failed (status=$status) for $addr, retrying...")
                         // Retry once — if it fails again the safety timeout will disconnect
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                         if (!gatt.writeDescriptor(descriptor)) {
                             Log.e(TAG, "Client: Retry writeDescriptor returned false for $addr, disconnecting")
                             gatt.disconnect()
