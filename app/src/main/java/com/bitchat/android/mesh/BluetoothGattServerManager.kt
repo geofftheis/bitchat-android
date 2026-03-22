@@ -35,6 +35,9 @@ class BluetoothGattServerManager(
     companion object {
         private const val TAG = "BluetoothGattServerManager"
     }
+
+    /** Max inbound subscriptions to accept. 0 = reject all (pre-lobby joining player). */
+    var maxServerConnections: Int = Int.MAX_VALUE
     
     // Core Bluetooth components
     private val bluetoothManager: BluetoothManager = 
@@ -274,13 +277,21 @@ class BluetoothGattServerManager(
                 // We prefer indications (confirmed) but accept notifications for compatibility.
                 if (BluetoothGattDescriptor.ENABLE_INDICATION_VALUE.contentEquals(value) ||
                     BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.contentEquals(value)) {
-                    connectionTracker.addSubscribedDevice(device)
+                    // Patch 50: Check server limit before accepting subscription.
+                    // Silently ignore instead of accepting then evicting, which would
+                    // kill the shared ACL link and destroy our outbound client connection.
+                    val currentServerCount = connectionTracker.getSubscribedDevices().size
+                    if (currentServerCount >= maxServerConnections) {
+                        Log.d(TAG, "Server: Ignoring subscription from ${device.address} (at limit: $maxServerConnections)")
+                    } else {
+                        connectionTracker.addSubscribedDevice(device)
 
-                    Log.d(TAG, "Server: Connection setup complete for ${device.address}")
-                    connectionScope.launch {
-                        delay(100)
-                        if (isActive) { // Check if still active
-                            delegate?.onDeviceConnected(device)
+                        Log.d(TAG, "Server: Connection setup complete for ${device.address}")
+                        connectionScope.launch {
+                            delay(100)
+                            if (isActive) {
+                                delegate?.onDeviceConnected(device)
+                            }
                         }
                     }
                 }

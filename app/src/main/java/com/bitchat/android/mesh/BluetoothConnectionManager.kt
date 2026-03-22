@@ -118,6 +118,7 @@ class BluetoothConnectionManager(
         set(value) {
             field = value
             clientManager.maxServerConnections = value
+            serverManager.maxServerConnections = value
         }
 
     /** Patch 50: Maximum total connections (client + server combined).
