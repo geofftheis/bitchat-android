@@ -97,8 +97,7 @@ class BluetoothGattClientManager(
     var reservedPeerPrefix: String = ""
 
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
-    // Wired to BluetoothPacketBroadcaster.onWriteAcknowledged by the connection manager.
-    var onCharacteristicWriteComplete: ((deviceAddress: String, status: Int) -> Unit)? = null
+    // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
 
     /**
      * Start client manager
@@ -606,11 +605,7 @@ class BluetoothGattClientManager(
                 }
             }
 
-            // Patch 42: Notify when a GATT write completes, unblocking the broadcaster's
-            // writeToDeviceConnAndAwaitAck for the next write (e.g., next fragment).
-            override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-                onCharacteristicWriteComplete?.invoke(gatt.device.address, status)
-            }
+            // Patch 42 onCharacteristicWrite removed — using WRITE_TYPE_NO_RESPONSE.
 
             override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
                 val deviceAddress = gatt.device.address

@@ -20,7 +20,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.channels.actor
 
@@ -95,15 +94,8 @@ class BluetoothPacketBroadcaster(
     private val broadcasterScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val transferJobs = ConcurrentHashMap<String, Job>()
 
-    // Patch 42: Per-device indication acknowledgment tracking.
-    // When we send a BLE indication (confirm=true), the receiver must acknowledge it
-    // before we can send the next one. This map holds a deferred per device address
-    // that is completed when onNotificationSent fires from the GATT server callback.
-    private val pendingIndicationAcks = ConcurrentHashMap<String, CompletableDeferred<Int>>()
-
-    // Patch 42: Per-device GATT write acknowledgment tracking (client→server path).
-    // Same principle as indications: only one outstanding writeCharacteristic per connection.
-    private val pendingWriteAcks = ConcurrentHashMap<String, CompletableDeferred<Int>>()
+    // Patch 42 ACK tracking removed — reverted to fire-and-forget in both directions.
+    // See BITCHAT_PATCHES.md for details.
     
     // SERIALIZATION: Actor to serialize all broadcast operations
     @OptIn(kotlinx.coroutines.ObsoleteCoroutinesApi::class)
@@ -121,21 +113,6 @@ class BluetoothPacketBroadcaster(
         }
     }
     
-    /**
-     * Patch 42: Called by BluetoothGattServerManager when onNotificationSent fires.
-     * Completes the pending deferred for the given device, unblocking the sender.
-     */
-    fun onIndicationAcknowledged(deviceAddress: String, status: Int) {
-        pendingIndicationAcks.remove(deviceAddress)?.complete(status)
-    }
-
-    /**
-     * Patch 42: Called by BluetoothGattClientManager when onCharacteristicWrite fires.
-     * Completes the pending deferred for the given device, unblocking the sender.
-     */
-    fun onWriteAcknowledged(deviceAddress: String, status: Int) {
-        pendingWriteAcks.remove(deviceAddress)?.complete(status)
-    }
 
     /**
      * Patch 42: Synchronous broadcast that waits for the actor to finish processing
@@ -538,50 +515,11 @@ class BluetoothPacketBroadcaster(
         }
     }
 
-    /**
-     * Patch 42: Send indication to device and wait for BLE-level acknowledgment.
-     *
-     * With BLE indications (confirm=true, Patch 40b), only one indication can be
-     * outstanding per connection. If we send another before the previous is acked,
-     * notifyCharacteristicChanged returns false and the data is silently dropped.
-     * This method waits for the onNotificationSent callback (via pendingIndicationAcks)
-     * before returning, ensuring reliable sequential delivery.
-     */
-    private suspend fun notifyDeviceAndAwaitAck(
-        device: BluetoothDevice,
-        data: ByteArray,
-        gattServer: BluetoothGattServer?,
-        characteristic: BluetoothGattCharacteristic?
-    ): Boolean {
-        repeat(4) { attempt ->
-            val ackDeferred = CompletableDeferred<Int>()
-            pendingIndicationAcks[device.address] = ackDeferred
-
-            val sent = notifyDevice(device, data, gattServer, characteristic)
-            if (sent) {
-                // Wait for onNotificationSent callback (up to 500ms)
-                val status = withTimeoutOrNull(500) { ackDeferred.await() }
-                pendingIndicationAcks.remove(device.address)
-                if (status != null) {
-                    return true
-                }
-                Log.w(TAG, "Patch 42: Indication ack timeout for ${device.address} (attempt ${attempt + 1}/4)")
-            } else {
-                pendingIndicationAcks.remove(device.address)
-                if (attempt < 3) {
-                    // BLE stack busy (previous indication still pending) - wait and retry
-                    Log.d(TAG, "Patch 42: BLE busy for ${device.address}, retrying (attempt ${attempt + 1}/4)")
-                    delay(50)
-                }
-            }
-        }
-        Log.w(TAG, "Patch 42: Failed to deliver indication to ${device.address} after 4 attempts")
-        return false
-    }
 
     /**
      * Send data to a single device (client->server) - fire-and-forget.
-     * Used by sendToPeer and other non-fragment paths where ack waiting is not needed.
+     * Uses WRITE_TYPE_NO_RESPONSE to match iOS behavior and avoid per-write ACK
+     * overhead that throttles throughput (same rationale as Patch 40b/42 revert).
      */
     private fun writeToDeviceConn(
         deviceConn: BluetoothConnectionTracker.DeviceConnection,
@@ -589,6 +527,7 @@ class BluetoothPacketBroadcaster(
     ): Boolean {
         return try {
             deviceConn.characteristic?.let { char ->
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 char.value = data
                 val result = deviceConn.gatt?.writeCharacteristic(char) ?: false
                 result
@@ -601,42 +540,6 @@ class BluetoothPacketBroadcaster(
         }
     }
 
-    /**
-     * Patch 42: Send GATT write to device and wait for onCharacteristicWrite callback.
-     *
-     * Same principle as notifyDeviceAndAwaitAck but for the client→server path.
-     * Android's BLE stack only allows one outstanding writeCharacteristic per connection.
-     * Calling it again before onCharacteristicWrite fires returns false and silently drops
-     * the data.
-     */
-    private suspend fun writeToDeviceConnAndAwaitAck(
-        deviceConn: BluetoothConnectionTracker.DeviceConnection,
-        data: ByteArray
-    ): Boolean {
-        val address = deviceConn.device.address
-        repeat(4) { attempt ->
-            val ackDeferred = CompletableDeferred<Int>()
-            pendingWriteAcks[address] = ackDeferred
-
-            val sent = writeToDeviceConn(deviceConn, data)
-            if (sent) {
-                val status = withTimeoutOrNull(500) { ackDeferred.await() }
-                pendingWriteAcks.remove(address)
-                if (status != null) {
-                    return true
-                }
-                Log.w(TAG, "Patch 42: Write ack timeout for $address (attempt ${attempt + 1}/4)")
-            } else {
-                pendingWriteAcks.remove(address)
-                if (attempt < 3) {
-                    Log.d(TAG, "Patch 42: GATT write busy for $address, retrying (attempt ${attempt + 1}/4)")
-                    delay(50)
-                }
-            }
-        }
-        Log.w(TAG, "Patch 42: Failed to deliver GATT write to $address after 4 attempts")
-        return false
-    }
     
     /**
      * Get debug information

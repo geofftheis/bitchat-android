@@ -80,16 +80,7 @@ class BluetoothConnectionManager(
     )
 
     init {
-        // Patch 42: Wire indication ack callback from GATT server to packet broadcaster
-        // so the broadcaster knows when it's safe to send the next indication.
-        serverManager.onIndicationSent = { deviceAddress, status ->
-            packetBroadcaster.onIndicationAcknowledged(deviceAddress, status)
-        }
-        // Patch 42: Wire GATT write callback from client manager to packet broadcaster
-        // so the broadcaster knows when it's safe to send the next write.
-        clientManager.onCharacteristicWriteComplete = { deviceAddress, status ->
-            packetBroadcaster.onWriteAcknowledged(deviceAddress, status)
-        }
+        // Patch 42 ACK wiring removed — reverted to fire-and-forget in both directions.
     }
 
     // Service state
