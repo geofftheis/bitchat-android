@@ -81,6 +81,8 @@ class BluetoothGattClientManager(
     // Patch 40: Configurable connection limits set by the app layer.
     var maxClientConnections: Int = 10
     var maxServerConnections: Int = 10
+    // Patch 50: Overall cap on total connections (client + server combined).
+    var maxTotalConnections: Int = Int.MAX_VALUE
 
     // Patch 41: Reserved slot — if set, one client connection slot is reserved for
     // a peer whose peerID starts with this prefix. Non-matching peers can only fill
@@ -388,7 +390,8 @@ class BluetoothGattClientManager(
         
         // Patch 40: Check configurable client connection limit instead of PowerManager default.
         val maxClient = maxClientConnections
-        val maxOverall = maxClient + maxServerConnections
+        // Patch 50: maxTotalConnections caps the combined limit when set
+        val maxOverall = minOf(maxClient + maxServerConnections, maxTotalConnections)
 
         // Patch 41: Reserved slot logic — reserve one client slot for the host peerID.
         // Non-host peers can only fill (maxClient - 1) slots until the reserved peer connects.

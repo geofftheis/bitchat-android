@@ -120,6 +120,16 @@ class BluetoothConnectionManager(
             clientManager.maxServerConnections = value
         }
 
+    /** Patch 50: Maximum total connections (client + server combined).
+     *  When set to a value less than maxClientConnections + maxServerConnections,
+     *  this acts as a tighter overall cap. Used to limit to 1 total connection
+     *  during the join flow before lobby entry. */
+    var maxTotalConnections: Int = Int.MAX_VALUE
+        set(value) {
+            field = value
+            clientManager.maxTotalConnections = value
+        }
+
     /** Patch 41: Reserved peer prefix — one client slot reserved for this peer. */
     var reservedPeerPrefix: String = ""
         set(value) {
@@ -165,7 +175,8 @@ class BluetoothConnectionManager(
             // Player: up to maxClientConnections client, up to maxServerConnections server.
             val maxClient = if (hostMode) 0 else maxClientConnections
             val maxServer = maxServerConnections
-            val maxOverall = maxClient + maxServer
+            // Patch 50: maxTotalConnections caps the combined limit when set
+            val maxOverall = minOf(maxClient + maxServer, maxTotalConnections)
 
             // Get list of connections to evict to satisfy all constraints
             val toEvict = connectionTracker.getConnectionsToEvict(maxOverall, maxServer, maxClient)

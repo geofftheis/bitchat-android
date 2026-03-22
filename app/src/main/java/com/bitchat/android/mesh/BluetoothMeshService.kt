@@ -102,6 +102,11 @@ class BluetoothMeshService(
         get() = connectionManager.maxServerConnections
         set(value) { connectionManager.maxServerConnections = value }
 
+    /** Patch 50: Set maximum total connections (client + server combined). */
+    var maxTotalConnections: Int
+        get() = connectionManager.maxTotalConnections
+        set(value) { connectionManager.maxTotalConnections = value }
+
     /** Patch 41: Reserved peer prefix — one client slot reserved for this peer. */
     var reservedPeerPrefix: String
         get() = connectionManager.reservedPeerPrefix
