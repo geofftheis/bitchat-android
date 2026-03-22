@@ -336,6 +336,9 @@ class BluetoothConnectionManager(
     }
     
 
+    /** Patch 48: Stop BLE advertising only (keeps GATT server and connections alive). */
+    fun stopBleAdvertising() { serverManager.stopBleAdvertising() }
+
     // Expose role controls for debug UI
     fun startServer() { connectionScope.launch { serverManager.start() } }
     fun stopServer() { connectionScope.launch { serverManager.stop() } }

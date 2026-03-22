@@ -92,8 +92,12 @@ class FragmentManager {
         val fragmentHeaderSize = 13 // FragmentPayload header
         val signatureSize = 64 // Ed25519 signature
 
-        // 514 (MTU-3) - Overhead = max fragment data size
-        val maxNotificationSize = 514
+        // Patch 47: Use 512 instead of 514 (MTU-3).  Android's
+        // BluetoothGattServer.notifyCharacteristicChanged() hard-rejects
+        // attribute values > 512 bytes, even though BLE protocol allows MTU-3
+        // (514).  Using 514 caused silent delivery failures on server→client
+        // notification paths.
+        val maxNotificationSize = 512
         val packetOverhead = headerSize + senderSize + recipientSize + routeSize + fragmentHeaderSize + signatureSize
         val maxDataSize = (maxNotificationSize - packetOverhead).coerceAtMost(MAX_FRAGMENT_SIZE)
         

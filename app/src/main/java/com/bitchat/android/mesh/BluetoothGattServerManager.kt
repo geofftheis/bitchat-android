@@ -470,6 +470,18 @@ class BluetoothGattServerManager(
     }
     
     /**
+     * Patch 48: Stop BLE advertising without tearing down the GATT server or
+     * connections.  Cancels any pending restartJob to prevent it from
+     * re-starting advertising after this call.
+     */
+    fun stopBleAdvertising() {
+        restartJob?.cancel()
+        restartJob = null
+        stopAdvertising()
+        Log.i(TAG, "BLE advertising stopped (GATT server still active)")
+    }
+
+    /**
      * Restart advertising (for power mode changes)
      */
     fun restartAdvertising() {
