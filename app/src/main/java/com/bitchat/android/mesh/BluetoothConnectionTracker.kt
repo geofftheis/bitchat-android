@@ -89,6 +89,17 @@ class BluetoothConnectionTracker(
      * Add a device connection
      */
     fun addDeviceConnection(deviceAddress: String, deviceConn: DeviceConnection) {
+        // Patch 46: Don't let a server-side callback overwrite an existing client connection.
+        // When our GATT client connects outbound, the same ACL link also triggers the GATT
+        // server's onConnectionStateChange (isClient=false). If that fires AFTER the client's
+        // onMtuChanged (isClient=true, with gatt reference), the overwrite destroys the gatt
+        // and characteristic references the broadcaster needs for relay writes.
+        val existing = connectedDevices[deviceAddress]
+        if (existing?.isClient == true && !deviceConn.isClient) {
+            Log.d(TAG, "Tracker: Preserving client connection for $deviceAddress (server-side callback skipped)")
+            pendingConnections.remove(deviceAddress)
+            return
+        }
         Log.d(TAG, "Tracker: Adding device connection for $deviceAddress (isClient: ${deviceConn.isClient}")
         connectedDevices[deviceAddress] = deviceConn
         pendingConnections.remove(deviceAddress)
