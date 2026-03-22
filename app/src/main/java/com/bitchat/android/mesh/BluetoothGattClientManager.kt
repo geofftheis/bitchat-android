@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
 // DebugSettingsManager and DebugScanResult removed (ui/ deleted in Patch 16).
 // All references below replaced with inline defaults.
@@ -73,6 +74,12 @@ class BluetoothGattClientManager(
     
     // State management
     private var isActive = false
+
+    // Patch 51: Track GATT objects from connectGatt() so they can be closed if the
+    // connection never completes. Without this, the BluetoothGatt is a local variable
+    // that goes out of scope, but the underlying GATT client registration in the BT
+    // stack persists forever, leaking conn_ids.
+    private val pendingGattClients = ConcurrentHashMap<String, BluetoothGatt>()
 
     // Patch 39: Mesh-maintenance mode uses BALANCED/AGGRESSIVE scan settings instead of aggressive LOW_LATENCY.
     // Host devices start in this mode from transport init; joiners switch to it after joining.
@@ -156,6 +163,17 @@ class BluetoothGattClientManager(
                 try { dc.gatt?.disconnect() } catch (_: Exception) { }
             }
         } catch (_: Exception) { }
+
+        // Patch 51: Close any GATT clients that never completed connection.
+        val pendingCount = pendingGattClients.size
+        if (pendingCount > 0) {
+            Log.i(TAG, "Closing $pendingCount pending GATT clients that never completed")
+            pendingGattClients.values.forEach { gatt ->
+                try { gatt.disconnect() } catch (_: Exception) { }
+                try { gatt.close() } catch (_: Exception) { }
+            }
+            pendingGattClients.clear()
+        }
 
         stopScanning()
         stopRSSIMonitoring()
@@ -431,6 +449,8 @@ class BluetoothGattClientManager(
         val gattCallback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                 Log.d(TAG, "Client: Connection state change - Device: $deviceAddress, Status: $status, NewState: $newState")
+                // Patch 51: GATT callback fired, so this is no longer a "lost" pending client.
+                pendingGattClients.remove(deviceAddress)
 
                 if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
                     Log.i(TAG, "Client: Successfully connected to $deviceAddress. Requesting MTU...")
@@ -617,6 +637,9 @@ class BluetoothGattClientManager(
                 // connectionTracker.removePendingConnection(deviceAddress)
             } else {
                 Log.d(TAG, "Client: GATT connection initiated successfully for $deviceAddress")
+                // Patch 51: Track this GATT so we can close() it if the connection
+                // never completes (no onConnectionStateChange callback fires).
+                pendingGattClients[deviceAddress] = gatt
             }
         } catch (e: Exception) {
             Log.e(TAG, "Client: Exception connecting to $deviceAddress: ${e.message}")
