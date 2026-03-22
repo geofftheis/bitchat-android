@@ -242,6 +242,11 @@ class BluetoothPacketBroadcaster(
     ): Boolean {
         val packet = routed.packet
         val data = packet.toBinaryData() ?: return false
+        if (data.size > 512) {
+            Log.w(TAG, "Packet too large for direct send (${data.size} bytes), falling back to fragmented broadcast")
+            broadcastSinglePacket(routed, gattServer, characteristic)
+            return true
+        }
         val isFile = packet.type == MessageType.FILE_TRANSFER.value
         if (isFile) {
             Log.d(TAG, "📤 Broadcasting FILE_TRANSFER: ${packet.payload.size} bytes")
@@ -329,6 +334,11 @@ class BluetoothPacketBroadcaster(
     ): Boolean {
         val packet = routed.packet
         val data = packet.toBinaryData() ?: return false
+        if (data.size > 512) {
+            Log.w(TAG, "Packet too large for direct send (${data.size} bytes), falling back to fragmented broadcast")
+            broadcastSinglePacket(routed, gattServer, characteristic)
+            return true
+        }
         val typeName = MessageType.fromValue(packet.type)?.name ?: packet.type.toString()
         val senderPeerID = routed.peerID ?: packet.senderID.toHexString()
         val incomingAddr = routed.relayAddress
