@@ -20,7 +20,8 @@ class PacketRelayManager(private val myPeerID: String) {
         private const val TAG = "PacketRelayManager"
     }
 
-    private fun isRelayEnabled(): Boolean = true
+    /** When false, this device will not relay packets for other peers. */
+    var relayEnabled: Boolean = true
 
     // Logging moved to BluetoothPacketBroadcaster per actual transmission target
     
@@ -96,7 +97,7 @@ class PacketRelayManager(private val myPeerID: String) {
         }
 
         // Apply relay logic based on packet type and debug switch
-        val shouldRelay = isRelayEnabled() && shouldRelayPacket(relayPacket, peerID)
+        val shouldRelay = relayEnabled && shouldRelayPacket(relayPacket, peerID)
         if (shouldRelay) {
             relayPacket(RoutedPacket(relayPacket, peerID, routed.relayAddress))
         } else {

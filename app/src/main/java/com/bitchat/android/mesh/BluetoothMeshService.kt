@@ -112,6 +112,11 @@ class BluetoothMeshService(
         get() = connectionManager.reservedPeerPrefix
         set(value) { connectionManager.reservedPeerPrefix = value }
 
+    /** Patch 52: When false, this device will not relay packets for other peers. */
+    var relayEnabled: Boolean
+        get() = packetProcessor.packetRelayManager.relayEnabled
+        set(value) { packetProcessor.packetRelayManager.relayEnabled = value }
+
     /** Patch 36: Forward advertising failure callback to connection manager. */
     var onAdvertisingFailed: ((Int) -> Unit)?
         get() = connectionManager.onAdvertisingFailed

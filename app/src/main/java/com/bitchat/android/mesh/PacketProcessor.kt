@@ -31,7 +31,7 @@ class PacketProcessor(private val myPeerID: String) {
     }
     
     // Packet relay manager for centralized relay decisions
-    private val packetRelayManager = PacketRelayManager(myPeerID)
+    internal val packetRelayManager = PacketRelayManager(myPeerID)
     
     // Coroutines
     private val processorScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
