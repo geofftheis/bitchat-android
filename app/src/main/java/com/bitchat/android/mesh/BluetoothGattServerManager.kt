@@ -387,9 +387,15 @@ class BluetoothGattServerManager(
             .addServiceUuid(ParcelUuid(serviceUuid))
             .setIncludeTxPowerLevel(false)
             .setIncludeDeviceName(false)
-        // Patch 26: Include game metadata as manufacturer data if set
+        // Patch 26/53a: Include game metadata + peerID prefix as manufacturer data.
+        // Format: [meta, p0, p1, p2, p3] — 1 byte metadata + first 4 bytes of peerID.
+        // This matches the iOS local name format ("H" + 2-hex meta + 8-hex prefix)
+        // so cross-platform host identification works in the reserved-slot logic.
         gameMetadataByte?.let { meta ->
-            dataBuilder.addManufacturerData(0xFFFF, byteArrayOf(meta))
+            val prefixBytes = try {
+                myPeerID.chunked(2).map { it.toInt(16).toByte() }.take(4).toByteArray()
+            } catch (_: Exception) { ByteArray(0) }
+            dataBuilder.addManufacturerData(0xFFFF, byteArrayOf(meta) + prefixBytes)
         }
         val data = dataBuilder.build()
 
