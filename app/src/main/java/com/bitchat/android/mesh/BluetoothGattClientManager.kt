@@ -410,9 +410,11 @@ class BluetoothGattClientManager(
         // Patch 50: maxTotalConnections caps the combined limit when set
         val maxOverall = minOf(maxClient + maxServerConnections, maxTotalConnections)
 
-        // Patch 41: Reserved slot logic — reserve one client slot for the host peerID.
+        // Patch 41/53a: Reserved slot logic — reserve one client slot for the host peerID.
         // Non-host peers can only fill (maxClient - 1) slots until the reserved peer connects.
-        val effectiveMaxClient = if (reservedPeerPrefix.isNotEmpty() && maxClient > 1) {
+        // Patch 53a: Removed maxClient > 1 guard so reservation works with a single
+        // slot (blocks non-host peers entirely pre-lobby).
+        val effectiveMaxClient = if (reservedPeerPrefix.isNotEmpty()) {
             val isReservedPeer = peerID != null && peerID.startsWith(reservedPeerPrefix)
             val hostAlreadyConnected = connectionTracker.addressPeerMap.values.any { it.startsWith(reservedPeerPrefix) }
             if (isReservedPeer || hostAlreadyConnected) {
