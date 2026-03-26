@@ -52,6 +52,9 @@ class BluetoothPacketBroadcaster(
         private const val CLEANUP_DELAY = com.bitchat.android.util.AppConstants.Mesh.BROADCAST_CLEANUP_DELAY_MS
     }
 
+    /** Patch 54: When set, non-host packets are only relayed toward the host. */
+    var hostPeerPrefix: String = ""
+
     // Optional nickname resolver injected by higher layer (peerID -> nickname?)
     private var nicknameResolver: ((String) -> String?)? = null
 
@@ -439,11 +442,15 @@ class BluetoothPacketBroadcaster(
         // Else, continue with broadcasting to all devices
         val subscribedDevices = connectionTracker.getSubscribedDevices()
         val connectedDevices = connectionTracker.getConnectedDevices()
-        
+
         Log.i(TAG, "Broadcasting packet v${packet.version} type ${packet.type} to ${subscribedDevices.size} server + ${connectedDevices.size} client connections")
 
         val senderID = packet.senderID.toHexString()
-        
+
+        // Patch 54: If the sender is NOT the host and we know the host prefix,
+        // only relay toward the host — skip other non-host peers.
+        val hostOnly = hostPeerPrefix.isNotEmpty() && !senderID.startsWith(hostPeerPrefix)
+
         // Send to server connections (devices connected to our GATT server)
         subscribedDevices.forEach { device ->
             if (device.address == routed.relayAddress) {
@@ -453,6 +460,14 @@ class BluetoothPacketBroadcaster(
             if (connectionTracker.addressPeerMap[device.address] == senderID) {
                 Log.d(TAG, "Skipping broadcast to client back to sender: ${device.address}")
                 return@forEach
+            }
+            // Patch 54: non-host traffic only goes to the host
+            if (hostOnly) {
+                val toPeer = connectionTracker.addressPeerMap[device.address]
+                if (toPeer == null || !toPeer.startsWith(hostPeerPrefix)) {
+                    Log.d(TAG, "Patch 54: Skipping relay of non-host packet to non-host peer: ${device.address}")
+                    return@forEach
+                }
             }
             val sent = notifyDevice(device, data, gattServer, characteristic)
             if (sent) {
@@ -471,6 +486,14 @@ class BluetoothPacketBroadcaster(
                 if (connectionTracker.addressPeerMap[deviceConn.device.address] == senderID) {
                     Log.d(TAG, "Skipping roadcast to server back to sender: ${deviceConn.device.address}")
                     return@forEach
+                }
+                // Patch 54: non-host traffic only goes to the host
+                if (hostOnly) {
+                    val toPeer = connectionTracker.addressPeerMap[deviceConn.device.address]
+                    if (toPeer == null || !toPeer.startsWith(hostPeerPrefix)) {
+                        Log.d(TAG, "Patch 54: Skipping relay of non-host packet to non-host peer: ${deviceConn.device.address}")
+                        return@forEach
+                    }
                 }
                 val sent = writeToDeviceConn(deviceConn, data)
                 if (sent) {

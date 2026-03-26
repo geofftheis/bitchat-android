@@ -129,6 +129,13 @@ class BluetoothConnectionManager(
             clientManager.reservedPeerPrefix = value
         }
 
+    /** Patch 54: Host peer prefix for relay filtering. */
+    var hostPeerPrefix: String = ""
+        set(value) {
+            field = value
+            packetBroadcaster.hostPeerPrefix = value
+        }
+
     /** Patch 39: Switch to mesh-maintenance scan mode (BALANCED/AGGRESSIVE). */
     fun switchToMeshMaintenanceMode() {
         clientManager.switchToMeshMaintenanceMode()

@@ -23,6 +23,11 @@ class PacketRelayManager(private val myPeerID: String) {
     /** When false, this device will not relay packets for other peers. */
     var relayEnabled: Boolean = true
 
+    /** Patch 54: When set, non-host packets are only relayed toward the host.
+     *  This is a peer-ID prefix; any peer whose ID starts with this prefix is
+     *  considered the host. Host-originated packets are still relayed to all. */
+    var hostPeerPrefix: String = ""
+
     // Logging moved to BluetoothPacketBroadcaster per actual transmission target
     
     // Delegate for callbacks

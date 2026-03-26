@@ -117,6 +117,11 @@ class BluetoothMeshService(
         get() = packetProcessor.packetRelayManager.relayEnabled
         set(value) { packetProcessor.packetRelayManager.relayEnabled = value }
 
+    /** Patch 54: When set, non-host packets are only relayed toward the host. */
+    var hostPeerPrefix: String
+        get() = connectionManager.hostPeerPrefix
+        set(value) { connectionManager.hostPeerPrefix = value }
+
     /** Patch 36: Forward advertising failure callback to connection manager. */
     var onAdvertisingFailed: ((Int) -> Unit)?
         get() = connectionManager.onAdvertisingFailed
