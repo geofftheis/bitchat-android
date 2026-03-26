@@ -449,7 +449,9 @@ class BluetoothPacketBroadcaster(
 
         // Patch 54: If the sender is NOT the host and we know the host prefix,
         // only relay toward the host — skip other non-host peers.
-        val hostOnly = hostPeerPrefix.isNotEmpty() && !senderID.startsWith(hostPeerPrefix)
+        // Exempt announce/requestSync packets so peer discovery still works across the mesh.
+        val isDiscoveryPacket = packet.type == MessageType.ANNOUNCE.value || packet.type == MessageType.REQUEST_SYNC.value
+        val hostOnly = hostPeerPrefix.isNotEmpty() && !senderID.startsWith(hostPeerPrefix) && !isDiscoveryPacket
 
         // Send to server connections (devices connected to our GATT server)
         subscribedDevices.forEach { device ->
