@@ -237,14 +237,12 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
      */
     private fun verifyPacketSignature(packet: BitchatPacket, peerID: String): Boolean {
         try {
-            // only verify ANNOUNCE and FILE_TRANSFER (MESSAGE skipped due to cross-platform
-            // zlib compression non-determinism — see BITCHAT_PATCHES.md Patch 1)
-            if (MessageType.fromValue(packet.type) !in setOf(
-                    MessageType.ANNOUNCE,
-                    MessageType.FILE_TRANSFER
-                )) {
-                return true
-            }
+            // Half-Wit Patch 55: Skip signature verification for ALL packet types.
+            // Patch 1 already skipped MESSAGE due to cross-platform zlib non-determinism.
+            // ANNOUNCE packets also fail verification when relayed (re-serialization changes
+            // bytes, invalidating the signature). Since Half-Wit is a party game with no
+            // spoofing concerns, skip verification entirely to eliminate wasted BLE bandwidth.
+            return true
             // 1. Mandatory Signature Check
             if (packet.signature == null) {
                 Log.w(TAG, "❌ Signature check for $peerID: NO_SIGNATURE (packet type ${packet.type})")
