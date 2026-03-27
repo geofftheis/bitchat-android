@@ -192,7 +192,7 @@ class BluetoothConnectionManager(
             val toEvict = connectionTracker.getConnectionsToEvict(maxOverall, maxServer, maxClient, hostPeerPrefix)
 
             if (toEvict.isNotEmpty()) {
-                val protectedCount = connectionTracker.connectedDevices.values.count { conn ->
+                val protectedCount = connectionTracker.getConnectedDevices().values.count { conn ->
                     hostPeerPrefix.isNotEmpty() && connectionTracker.addressPeerMap[conn.device.address]?.startsWith(hostPeerPrefix) == true
                 }
                 Log.i(TAG, "Enforcing limits (max: $maxOverall, s: $maxServer, c: $maxClient, hostMode: $hostMode) - evicting ${toEvict.size} connections (${protectedCount} host-protected)")

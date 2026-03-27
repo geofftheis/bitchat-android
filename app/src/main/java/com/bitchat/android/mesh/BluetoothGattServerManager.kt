@@ -283,7 +283,7 @@ class BluetoothGattServerManager(
                     // kill the shared ACL link and destroy our outbound client connection.
                     // Patch 57: Also check total connection count to prevent exceeding maxTotalConnections.
                     val currentServerCount = connectionTracker.getSubscribedDevices().size
-                    val totalConnections = connectionTracker.connectedDevices.size
+                    val totalConnections = connectionTracker.getConnectedDeviceCount()
                     if (currentServerCount >= maxServerConnections || totalConnections >= maxTotalConnections) {
                         Log.d(TAG, "Server: Ignoring subscription from ${device.address} (server: $currentServerCount/$maxServerConnections, total: $totalConnections/$maxTotalConnections)")
                     } else {
