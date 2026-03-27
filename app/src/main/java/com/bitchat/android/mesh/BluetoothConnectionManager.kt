@@ -120,6 +120,7 @@ class BluetoothConnectionManager(
         set(value) {
             field = value
             clientManager.maxTotalConnections = value
+            serverManager.maxTotalConnections = value
         }
 
     /** Patch 41: Reserved peer prefix — one client slot reserved for this peer. */

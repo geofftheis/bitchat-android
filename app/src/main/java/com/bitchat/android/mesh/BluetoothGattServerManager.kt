@@ -38,6 +38,9 @@ class BluetoothGattServerManager(
 
     /** Max inbound subscriptions to accept. 0 = reject all (pre-lobby joining player). */
     var maxServerConnections: Int = Int.MAX_VALUE
+
+    /** Patch 57: Total connection cap — reject inbound if total would exceed this. */
+    var maxTotalConnections: Int = Int.MAX_VALUE
     
     // Core Bluetooth components
     private val bluetoothManager: BluetoothManager = 
@@ -278,9 +281,11 @@ class BluetoothGattServerManager(
                     // Patch 50: Check server limit before accepting subscription.
                     // Silently ignore instead of accepting then evicting, which would
                     // kill the shared ACL link and destroy our outbound client connection.
+                    // Patch 57: Also check total connection count to prevent exceeding maxTotalConnections.
                     val currentServerCount = connectionTracker.getSubscribedDevices().size
-                    if (currentServerCount >= maxServerConnections) {
-                        Log.d(TAG, "Server: Ignoring subscription from ${device.address} (at limit: $maxServerConnections)")
+                    val totalConnections = connectionTracker.connectedDevices.size
+                    if (currentServerCount >= maxServerConnections || totalConnections >= maxTotalConnections) {
+                        Log.d(TAG, "Server: Ignoring subscription from ${device.address} (server: $currentServerCount/$maxServerConnections, total: $totalConnections/$maxTotalConnections)")
                     } else {
                         connectionTracker.addSubscribedDevice(device)
 
