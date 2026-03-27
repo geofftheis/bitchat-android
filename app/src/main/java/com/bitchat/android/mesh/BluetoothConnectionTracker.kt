@@ -263,45 +263,55 @@ class BluetoothConnectionTracker(
      * 1. Enforce strict role limits (maxClient, maxServer) - evict oldest excess.
      * 2. Enforce overall limit (maxOverall) - evict oldest remaining, preferring clients.
      */
-    fun getConnectionsToEvict(maxOverall: Int, maxServer: Int, maxClient: Int): List<DeviceConnection> {
+    fun getConnectionsToEvict(maxOverall: Int, maxServer: Int, maxClient: Int, hostPeerPrefix: String = ""): List<DeviceConnection> {
         val toEvict = mutableSetOf<DeviceConnection>()
         val currentDevices = connectedDevices.values.toList()
-        
-        // 1. Enforce Role Limits
-        val clients = currentDevices.filter { it.isClient }.sortedBy { it.connectedAt }
-        if (clients.size > maxClient) {
-            toEvict.addAll(clients.take(clients.size - maxClient))
+
+        // Patch 57: Never evict the host's connection — losing the host link
+        // kills the shared ACL link (both client and server roles) and severs
+        // all communication with the host permanently.
+        val isHostConnection: (DeviceConnection) -> Boolean = { conn ->
+            if (hostPeerPrefix.isEmpty()) false
+            else addressPeerMap[conn.device.address]?.startsWith(hostPeerPrefix) == true
         }
-        
-        val servers = currentDevices.filter { !it.isClient }.sortedBy { it.connectedAt }
-        if (servers.size > maxServer) {
-            toEvict.addAll(servers.take(servers.size - maxServer))
+
+        // 1. Enforce Role Limits (skip host connections)
+        val clients = currentDevices.filter { it.isClient && !isHostConnection(it) }.sortedBy { it.connectedAt }
+        if (currentDevices.count { it.isClient } > maxClient) {
+            val excess = currentDevices.count { it.isClient } - maxClient
+            toEvict.addAll(clients.take(excess))
         }
-        
+
+        val servers = currentDevices.filter { !it.isClient && !isHostConnection(it) }.sortedBy { it.connectedAt }
+        if (currentDevices.count { !it.isClient } > maxServer) {
+            val excess = currentDevices.count { !it.isClient } - maxServer
+            toEvict.addAll(servers.take(excess))
+        }
+
         // 2. Enforce Overall Limit
         // Count how many would remain after the above evictions
         val remaining = currentDevices.filter { !toEvict.contains(it) }
         if (remaining.size > maxOverall) {
             val excessCount = remaining.size - maxOverall
-            
-            // Explicitly prefer evicting clients first
-            val clientCandidates = remaining.filter { it.isClient }.sortedBy { it.connectedAt }
-            val serverCandidates = remaining.filter { !it.isClient }.sortedBy { it.connectedAt }
-            
+
+            // Explicitly prefer evicting clients first (skip host connections)
+            val clientCandidates = remaining.filter { it.isClient && !isHostConnection(it) }.sortedBy { it.connectedAt }
+            val serverCandidates = remaining.filter { !it.isClient && !isHostConnection(it) }.sortedBy { it.connectedAt }
+
             var needed = excessCount
-            
+
             // Take from clients first
             val fromClients = clientCandidates.take(needed)
             toEvict.addAll(fromClients)
             needed -= fromClients.size
-            
+
             // If still need more, take from servers
             if (needed > 0) {
                 val fromServers = serverCandidates.take(needed)
                 toEvict.addAll(fromServers)
             }
         }
-        
+
         return toEvict.toList()
     }
     
