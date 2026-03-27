@@ -86,6 +86,11 @@ class BluetoothMeshService(
         connectionManager.stopScanning()
     }
 
+    /** Evict connections that exceed current limits (e.g., stale client connections after entering host mode). */
+    fun enforceConnectionLimits() {
+        connectionManager.enforceConnectionLimits()
+    }
+
     /** Patch 40: Enable host mode — disables scanning and outbound client connections.
      *  Must be set BEFORE calling startServices(). */
     var hostMode: Boolean

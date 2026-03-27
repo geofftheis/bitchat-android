@@ -163,6 +163,15 @@ class BluetoothConnectionManager(
     }
     
     /**
+     * Public entry point to re-evaluate connection limits.
+     * Called by the app layer after connection limits change (e.g., host mode enabled)
+     * to evict stale connections that exceed the new limits.
+     */
+    fun enforceConnectionLimits() {
+        enforceStrictLimits()
+    }
+
+    /**
      * Centralized connection limit enforcement
      */
     private fun enforceStrictLimits() {
