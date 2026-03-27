@@ -235,72 +235,12 @@ class SecurityManager(private val encryptionService: EncryptionService, private 
      * Verify packet signature using peer's signing public key
      * Returns true only if signature is present and valid
      */
-    private fun verifyPacketSignature(packet: BitchatPacket, peerID: String): Boolean {
-        try {
-            // Half-Wit Patch 55: Skip signature verification for ALL packet types.
-            // Patch 1 already skipped MESSAGE due to cross-platform zlib non-determinism.
-            // ANNOUNCE packets also fail verification when relayed (re-serialization changes
-            // bytes, invalidating the signature). Since Half-Wit is a party game with no
-            // spoofing concerns, skip verification entirely to eliminate wasted BLE bandwidth.
-            return true
-            // 1. Mandatory Signature Check
-            if (packet.signature == null) {
-                Log.w(TAG, "❌ Signature check for $peerID: NO_SIGNATURE (packet type ${packet.type})")
-                return false
-            }
-            
-            // 2. Get Signing Public Key
-            var signingPublicKey: ByteArray? = null
-            
-            if (MessageType.fromValue(packet.type) == MessageType.ANNOUNCE) {
-                // Special Case: ANNOUNCE packets carry their own signing key
-                try {
-                    val announcement = com.bitchat.android.model.IdentityAnnouncement.decode(packet.payload)
-                    signingPublicKey = announcement?.signingPublicKey
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to decode announcement for key extraction: ${e.message}")
-                }
-            } else {
-                // Standard Case: Get key from known peer info
-                val peerInfo = delegate?.getPeerInfo(peerID)
-                signingPublicKey = peerInfo?.signingPublicKey
-            }
-            
-            if (signingPublicKey == null) {
-                // If we don't have a key (and it's not an announce), we can't verify.
-                // For security, we must reject packets from unknown peers unless it's an announce.
-                Log.w(TAG, "❌ Signature check for $peerID: NO_SIGNING_KEY_AVAILABLE (packet type ${packet.type})")
-                return false
-            }
-            
-            // 3. Get Canonical Data
-            val packetDataForSigning = packet.toBinaryDataForSigning()
-            if (packetDataForSigning == null) {
-                Log.w(TAG, "❌ Signature check for $peerID: ENCODING_ERROR (packet type ${packet.type})")
-                return false
-            }
-            
-            // 4. Verify Signature
-            val signature = packet.signature!!
-            val isSignatureValid = encryptionService.verifyEd25519Signature(
-                signature,
-                packetDataForSigning,
-                signingPublicKey
-            )
-            
-            if (isSignatureValid) {
-                // Log.v(TAG, "✅ Signature verified for $peerID (type ${packet.type})")
-                return true
-            } else {
-                Log.w(TAG, "❌ Signature INVALID for $peerID (type ${packet.type})")
-                return false
-            }
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Signature verification error for $peerID: ${e.message}")
-            return false
-        }
-    }
+    // Half-Wit Patch 55: Skip signature verification for ALL packet types.
+    // Patch 1 already skipped MESSAGE due to cross-platform zlib non-determinism.
+    // ANNOUNCE packets also fail verification when relayed (re-serialization changes
+    // bytes, invalidating the signature). Since Half-Wit is a party game with no
+    // spoofing concerns, skip verification entirely to eliminate wasted BLE bandwidth.
+    private fun verifyPacketSignature(packet: BitchatPacket, peerID: String): Boolean = true
     
     /**
      * Check if we have encryption keys for a peer
