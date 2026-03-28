@@ -156,10 +156,18 @@ class BluetoothGattClientManager(
 
         // Stop synchronously so cleanup isn't skipped if connectionScope
         // is cancelled before this coroutine executes.
+        // Patch 58b: disconnect AND close established GATT clients.
+        // disconnect() alone is a request the BLE stack may not honor — the ACL
+        // link can persist for 30+ seconds, blocking new connectGatt() calls to the
+        // same device (status 133). close() releases the GATT client resources so
+        // the stack can tear down the ACL. Pending (incomplete) clients already get
+        // disconnect+close below (Patch 51); this extends the same pattern to
+        // established connections.
         try {
             val conns = connectionTracker.getConnectedDevices().values.filter { it.isClient && it.gatt != null }
             conns.forEach { dc ->
                 try { dc.gatt?.disconnect() } catch (_: Exception) { }
+                try { dc.gatt?.close() } catch (_: Exception) { }
             }
         } catch (_: Exception) { }
 
