@@ -163,9 +163,11 @@ class BluetoothGattClientManager(
         // the stack can tear down the ACL. Pending (incomplete) clients already get
         // disconnect+close below (Patch 51); this extends the same pattern to
         // established connections.
+        val devicesToCheck = mutableListOf<BluetoothDevice>()
         try {
             val conns = connectionTracker.getConnectedDevices().values.filter { it.isClient && it.gatt != null }
             conns.forEach { dc ->
+                devicesToCheck.add(dc.device)
                 try { dc.gatt?.disconnect() } catch (_: Exception) { }
                 try { dc.gatt?.close() } catch (_: Exception) { }
             }
@@ -180,6 +182,28 @@ class BluetoothGattClientManager(
                 try { gatt.close() } catch (_: Exception) { }
             }
             pendingGattClients.clear()
+        }
+
+        // Patch 58b: Poll until all GATT client devices are actually disconnected
+        // at the BLE controller level (or timeout). disconnect()+close() return
+        // immediately but the ACL link can persist — the BLE controller may still
+        // consider the device connected and refuse new connectGatt() calls to the
+        // same physical device (status 133). Polling getConnectionState() ensures
+        // the ACL is torn down before the next transport session starts.
+        if (devicesToCheck.isNotEmpty()) {
+            val deadline = System.currentTimeMillis() + 2000
+            while (System.currentTimeMillis() < deadline) {
+                val allDisconnected = devicesToCheck.all { device ->
+                    try {
+                        bluetoothManager.getConnectionState(device, BluetoothProfile.GATT) != BluetoothProfile.STATE_CONNECTED
+                    } catch (_: Exception) { true }
+                }
+                if (allDisconnected) {
+                    Log.i(TAG, "Patch 58b: All GATT clients confirmed disconnected")
+                    break
+                }
+                Thread.sleep(50)
+            }
         }
 
         stopScanning()
