@@ -258,6 +258,15 @@ class BluetoothConnectionManager(
                 }
                 Log.d(TAG, "GATT Server started")
 
+                // Patch 58b: Evict stale connections from a previous transport session.
+                // When the GATT server opens, the BLE stack fires onConnectionStateChange
+                // for surviving ACL links, adding them to the tracker. A brief delay lets
+                // those callbacks arrive before we enforce limits. Without this, stale
+                // connections consume the maxTotalConnections budget and block new outbound
+                // connections to the host.
+                delay(300)
+                enforceStrictLimits()
+
                 // Patch 40: Host mode skips client manager (no scanning, no outbound connections).
                 // Host only accepts inbound connections via the GATT server.
                 if (hostMode) {
