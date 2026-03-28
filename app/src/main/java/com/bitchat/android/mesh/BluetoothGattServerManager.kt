@@ -186,6 +186,18 @@ class BluetoothGattServerManager(
                     BluetoothProfile.STATE_CONNECTED -> {
                         Log.i(TAG, "Server: Device connected ${device.address}")
 
+                        // Patch 58: When maxServerConnections=0 (pre-lobby joining player),
+                        // immediately reject inbound ACL connections. Without this, the ACL
+                        // connection is tracked in connectedDevices and consumes the
+                        // maxTotalConnections budget before the subscription check in
+                        // onDescriptorWriteRequest can reject it. This blocks the single
+                        // pre-lobby outbound slot meant for the host connection.
+                        if (maxServerConnections <= 0) {
+                            Log.i(TAG, "Patch 58: Rejecting inbound ACL from ${device.address} (maxServerConnections=0, pre-lobby)")
+                            try { gattServer?.cancelConnection(device) } catch (_: Exception) { }
+                            return
+                        }
+
                         // Get best available RSSI (scan RSSI for server connections)
                         val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
 
