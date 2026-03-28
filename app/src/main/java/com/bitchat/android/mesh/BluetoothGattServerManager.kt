@@ -198,22 +198,11 @@ class BluetoothGattServerManager(
                             return
                         }
 
-                        // Get best available RSSI (scan RSSI for server connections)
-                        val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
-
-                        val deviceConn = BluetoothConnectionTracker.DeviceConnection(
-                            device = device,
-                            rssi = rssi,
-                            isClient = false
-                        )
-                        connectionTracker.addDeviceConnection(device.address, deviceConn)
-
-                        connectionScope.launch {
-                            delay(1000)
-                            if (isActive) { // Check if still active
-                                delegate?.onDeviceConnected(device)
-                            }
-                        }
+                        // Patch 62: Don't add to connectedDevices here. Only track devices
+                        // that complete the GATT subscription handshake (onDescriptorWriteRequest).
+                        // This prevents phantom connections (non-game BLE devices, background
+                        // scans, etc.) from consuming server connection slots.
+                        Log.i(TAG, "Server: ACL connected from ${device.address} — awaiting subscription")
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         Log.i(TAG, "Server: Device disconnected ${device.address}")
@@ -293,12 +282,25 @@ class BluetoothGattServerManager(
                     // Patch 50: Check server limit before accepting subscription.
                     // Silently ignore instead of accepting then evicting, which would
                     // kill the shared ACL link and destroy our outbound client connection.
-                    // Patch 57: Also check total connection count to prevent exceeding maxTotalConnections.
+                    // Patch 57/62: Total connection count uses subscribed + client (game
+                    // participants only), not raw connectedDevices which could include
+                    // phantom BLE connections from non-game devices.
                     val currentServerCount = connectionTracker.getSubscribedDevices().size
-                    val totalConnections = connectionTracker.getConnectedDeviceCount()
-                    if (currentServerCount >= maxServerConnections || totalConnections >= maxTotalConnections) {
-                        Log.d(TAG, "Server: Ignoring subscription from ${device.address} (server: $currentServerCount/$maxServerConnections, total: $totalConnections/$maxTotalConnections)")
+                    val clientCount = connectionTracker.getConnectedDevices().values.count { it.isClient }
+                    val totalGameConnections = currentServerCount + clientCount
+                    if (currentServerCount >= maxServerConnections || totalGameConnections >= maxTotalConnections) {
+                        Log.d(TAG, "Server: Ignoring subscription from ${device.address} (server: $currentServerCount/$maxServerConnections, total: $totalGameConnections/$maxTotalConnections)")
                     } else {
+                        // Patch 62: Track the device in connectedDevices now that it has
+                        // subscribed. This is the point where we know it's a real game
+                        // participant, not a phantom BLE connection.
+                        val rssi = connectionTracker.getBestRSSI(device.address) ?: Int.MIN_VALUE
+                        val deviceConn = BluetoothConnectionTracker.DeviceConnection(
+                            device = device,
+                            rssi = rssi,
+                            isClient = false
+                        )
+                        connectionTracker.addDeviceConnection(device.address, deviceConn)
                         connectionTracker.addSubscribedDevice(device)
 
                         Log.d(TAG, "Server: Connection setup complete for ${device.address}")
