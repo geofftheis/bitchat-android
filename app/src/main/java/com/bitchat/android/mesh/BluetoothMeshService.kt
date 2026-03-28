@@ -565,12 +565,17 @@ class BluetoothMeshService(
                             // Mark as directly connected - refresh UI state
                             try { peerManager.refreshPeerList() } catch (_: Exception) { }
 
-                            // Initial sync for this direct peer
-                            try { gossipSyncManager.scheduleInitialSyncToPeer(pid, 1_000) } catch (_: Exception) { }
+                            // Half-Wit Patch 8: scheduleInitialSyncToPeer disabled.
+                            // Gossip sync is off (Patch 8) but the initial sync path was
+                            // still active, replaying cached stale packets from previous
+                            // game sessions to reconnecting peers. iOS already has this as
+                            // a no-op (gossipSyncManager is nil). Disable here to match.
+                            // try { gossipSyncManager.scheduleInitialSyncToPeer(pid, 1_000) } catch (_: Exception) { }
                         }
                     }
                     // Track for sync
-                    try { gossipSyncManager.onPublicPacketSeen(routed.packet) } catch (_: Exception) { }
+                    // Half-Wit Patch 8: gossip sync disabled — skip packet caching
+                    // try { gossipSyncManager.onPublicPacketSeen(routed.packet) } catch (_: Exception) { }
                 }
             }
             
@@ -578,25 +583,17 @@ class BluetoothMeshService(
                 serviceScope.launch { messageHandler.handleMessage(routed) }
                 // Track broadcast messages for sync
                 try {
-                    val pkt = routed.packet
-                    val isBroadcast = (pkt.recipientID == null || pkt.recipientID.contentEquals(SpecialRecipients.BROADCAST))
-                    if (isBroadcast && pkt.type == MessageType.MESSAGE.value) {
-                        gossipSyncManager.onPublicPacketSeen(pkt)
-                    }
+                    // Half-Wit Patch 8: gossip sync disabled — skip packet caching
                 } catch (_: Exception) { }
             }
-            
+
             override fun handleLeave(routed: RoutedPacket) {
                 serviceScope.launch { messageHandler.handleLeave(routed) }
             }
-            
+
             override fun handleFragment(packet: BitchatPacket): BitchatPacket? {
-                // Track broadcast fragments for gossip sync
+                // Half-Wit Patch 8: gossip sync disabled — skip fragment caching
                 try {
-                    val isBroadcast = (packet.recipientID == null || packet.recipientID.contentEquals(SpecialRecipients.BROADCAST))
-                    if (isBroadcast && packet.type == MessageType.FRAGMENT.value) {
-                        gossipSyncManager.onPublicPacketSeen(packet)
-                    }
                 } catch (_: Exception) { }
                 return fragmentManager.handleFragment(packet)
             }
@@ -800,8 +797,8 @@ class BluetoothMeshService(
             // Sign the packet before broadcasting
             val signedPacket = signPacketBeforeBroadcast(packet)
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
-            // Track our own broadcast message for sync
-            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+            // Half-Wit Patch 8: gossip sync disabled — skip packet caching
+            // try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
     }
 
@@ -832,7 +829,8 @@ class BluetoothMeshService(
             // Use a stable transferId based on the file TLV payload for progress tracking
             val transferId = sha256Hex(payload)
             connectionManager.broadcastPacket(RoutedPacket(signed, transferId = transferId))
-            try { gossipSyncManager.onPublicPacketSeen(signed) } catch (_: Exception) { }
+            // Half-Wit Patch 8: gossip sync disabled — skip packet caching
+            // try { gossipSyncManager.onPublicPacketSeen(signed) } catch (_: Exception) { }
         }
             } catch (e: Exception) {
             Log.e(TAG, "❌ sendFileBroadcast failed: ${e.message}", e)
@@ -1145,8 +1143,8 @@ class BluetoothMeshService(
             
             connectionManager.broadcastPacket(RoutedPacket(signedPacket))
             Log.d(TAG, "Sent iOS-compatible signed TLV announce (${tlvPayload.size} bytes)")
-            // Track announce for sync
-            try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+            // Half-Wit Patch 8: gossip sync disabled — skip packet caching
+            // try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
         }
     }
     
@@ -1210,8 +1208,8 @@ class BluetoothMeshService(
         peerManager.markPeerAsAnnouncedTo(peerID)
         Log.d(TAG, "Sent iOS-compatible signed TLV peer announce to $peerID (${tlvPayload.size} bytes)")
 
-        // Track announce for sync
-        try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
+        // Half-Wit Patch 8: gossip sync disabled — skip packet caching
+        // try { gossipSyncManager.onPublicPacketSeen(signedPacket) } catch (_: Exception) { }
     }
 
     /**
