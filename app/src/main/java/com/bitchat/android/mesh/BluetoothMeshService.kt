@@ -91,6 +91,17 @@ class BluetoothMeshService(
         connectionManager.enforceConnectionLimits()
     }
 
+    /** Patch 59: Disconnect a specific peer by peer ID (e.g., when host removes them from the lobby). */
+    fun disconnectPeer(peerId: String) {
+        val address = connectionManager.addressPeerMap.entries
+            .find { it.value == peerId }?.key ?: return
+        val conn = connectionManager.connectionTracker.getConnectedDevices()[address] ?: return
+        try { conn.gatt?.disconnect() } catch (_: Exception) { }
+        try { conn.gatt?.close() } catch (_: Exception) { }
+        connectionManager.connectionTracker.cleanupDeviceConnection(address)
+        Log.i(TAG, "Patch 59: Disconnected departed peer ${peerId.take(8)} at $address")
+    }
+
     /** Patch 40: Enable host mode — disables scanning and outbound client connections.
      *  Must be set BEFORE calling startServices(). */
     var hostMode: Boolean
