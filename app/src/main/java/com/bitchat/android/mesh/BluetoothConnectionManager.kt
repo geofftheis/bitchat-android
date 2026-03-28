@@ -406,6 +406,16 @@ class BluetoothConnectionManager(
     fun connectToAddress(address: String): Boolean = clientManager.connectToAddress(address)
     fun disconnectAddress(address: String) { connectionTracker.disconnectDevice(address) }
 
+    /** Patch 59: Disconnect a specific peer by peer ID. Reverse-lookups the BLE address
+     *  from addressPeerMap, then disconnects+closes the GATT client and cleans up tracking. */
+    fun disconnectPeer(peerId: String) {
+        val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: return
+        val conn = connectionTracker.getConnectedDevices()[address] ?: return
+        try { conn.gatt?.disconnect() } catch (_: Exception) { }
+        try { conn.gatt?.close() } catch (_: Exception) { }
+        connectionTracker.cleanupDeviceConnection(address)
+        Log.i(TAG, "Patch 59: Disconnected departed peer ${peerId.take(8)} at $address")
+    }
 
     // Optionally disconnect all connections (server and client)
     fun disconnectAll() {
