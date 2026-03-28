@@ -406,15 +406,27 @@ class BluetoothConnectionManager(
     fun connectToAddress(address: String): Boolean = clientManager.connectToAddress(address)
     fun disconnectAddress(address: String) { connectionTracker.disconnectDevice(address) }
 
-    /** Patch 59: Disconnect a specific peer by peer ID. Reverse-lookups the BLE address
-     *  from addressPeerMap, then disconnects+closes the GATT client and cleans up tracking. */
+    /** Patch 59/61: Disconnect a specific peer by peer ID. Reverse-lookups the BLE address
+     *  from addressPeerMap, then disconnects both GATT client and server connections.
+     *  Patch 61 added server-side disconnect to ensure the host tears down inbound connections
+     *  from departed peers, preventing stale ACL links that block reconnection. */
     fun disconnectPeer(peerId: String) {
         val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: return
-        val conn = connectionTracker.getConnectedDevices()[address] ?: return
-        try { conn.gatt?.disconnect() } catch (_: Exception) { }
-        try { conn.gatt?.close() } catch (_: Exception) { }
-        connectionTracker.cleanupDeviceConnection(address)
-        Log.i(TAG, "Patch 59: Disconnected departed peer ${peerId.take(8)} at $address")
+        val conn = connectionTracker.getConnectedDevices()[address]
+        if (conn != null) {
+            if (conn.isClient) {
+                // Client-side (outbound): disconnect + close GATT client
+                try { conn.gatt?.disconnect() } catch (_: Exception) { }
+                try { conn.gatt?.close() } catch (_: Exception) { }
+            } else {
+                // Server-side (inbound): cancel connection via GATT server
+                serverManager.disconnectDevice(conn.device)
+            }
+            connectionTracker.cleanupDeviceConnection(address)
+            Log.i(TAG, "Patch 59/61: Disconnected departed peer ${peerId.take(8)} at $address (client=${conn.isClient})")
+        } else {
+            Log.i(TAG, "Patch 59/61: No active connection for departed peer ${peerId.take(8)} at $address")
+        }
     }
 
     // Optionally disconnect all connections (server and client)
