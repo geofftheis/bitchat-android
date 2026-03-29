@@ -130,6 +130,13 @@ class BluetoothConnectionManager(
             clientManager.reservedPeerPrefix = value
         }
 
+    /** Patch 71: Approved peer prefixes for outbound connection filtering. */
+    var approvedPeerPrefixes: Set<String> = emptySet()
+        set(value) {
+            field = value
+            clientManager.approvedPeerPrefixes = value
+        }
+
     /** Patch 54: Host peer prefix for relay filtering. */
     var hostPeerPrefix: String = ""
         set(value) {

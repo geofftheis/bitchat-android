@@ -132,6 +132,11 @@ class BluetoothMeshService(
         get() = connectionManager.reservedPeerPrefix
         set(value) { connectionManager.reservedPeerPrefix = value }
 
+    /** Patch 71: Approved peer prefixes for outbound connection filtering. */
+    var approvedPeerPrefixes: Set<String>
+        get() = connectionManager.approvedPeerPrefixes
+        set(value) { connectionManager.approvedPeerPrefixes = value }
+
     /** Patch 52: When false, this device will not relay packets for other peers. */
     var relayEnabled: Boolean
         get() = packetProcessor.packetRelayManager.relayEnabled

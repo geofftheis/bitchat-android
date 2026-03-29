@@ -96,6 +96,10 @@ class BluetoothGattClientManager(
     // (maxClientConnections - 1) slots until the reserved peer is connected.
     var reservedPeerPrefix: String = ""
 
+    // Patch 71: Approved peer prefixes — only connect outbound to peers in this list.
+    // Populated from the game's player list on every LobbySync. Empty = allow all.
+    var approvedPeerPrefixes: Set<String> = emptySet()
+
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
     // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
 
@@ -437,6 +441,17 @@ class BluetoothGattClientManager(
             return
         }
         
+        // Patch 71: Only connect to approved peers (if list is populated).
+        // The host (reservedPeerPrefix) always bypasses this check.
+        val isReservedPeer = peerID != null && reservedPeerPrefix.isNotEmpty() && peerID.startsWith(reservedPeerPrefix)
+        if (!isReservedPeer && approvedPeerPrefixes.isNotEmpty()) {
+            val isApproved = peerID != null && approvedPeerPrefixes.any { peerID.startsWith(it) }
+            if (!isApproved) {
+                Log.d(TAG, "Patch 71: Skipping unapproved peer $peerID (${deviceAddress})")
+                return
+            }
+        }
+
         // Patch 40: Check configurable client connection limit instead of PowerManager default.
         val maxClient = maxClientConnections
         // Patch 50: maxTotalConnections caps the combined limit when set
@@ -447,7 +462,7 @@ class BluetoothGattClientManager(
         // Patch 53a: Removed maxClient > 1 guard so reservation works with a single
         // slot (blocks non-host peers entirely pre-lobby).
         val effectiveMaxClient = if (reservedPeerPrefix.isNotEmpty()) {
-            val isReservedPeer = peerID != null && peerID.startsWith(reservedPeerPrefix)
+            // isReservedPeer already computed above (Patch 71)
             val hostAlreadyConnected = connectionTracker.addressPeerMap.values.any { it.startsWith(reservedPeerPrefix) }
             if (isReservedPeer || hostAlreadyConnected) {
                 maxClient // Full budget for the reserved peer, or if host already connected
