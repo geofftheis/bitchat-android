@@ -300,12 +300,15 @@ class BluetoothConnectionManager(
 
         isActive = false
 
-        // Stop BLE advertising and GATT server/client synchronously so they
-        // aren't skipped if the coroutine scope is cancelled or never executes.
-        // These are lightweight Bluetooth API calls safe to run on any thread.
-        Log.d(TAG, "Stopping client/server and power components...")
-        clientManager.stop()
+        // Patch 64: Stop server FIRST so server-side GATT registrations release
+        // their hold on ACL links. Then stop clients — with no server registration
+        // keeping ACLs alive, the client disconnect+close+poll can fully tear them
+        // down. Previously client stopped first, but the server-side registration
+        // kept ACLs alive through the client's 2-second poll, leaving zombie links
+        // that blocked rejoining (Status 133).
+        Log.d(TAG, "Stopping server then client for clean ACL teardown...")
         serverManager.stop()
+        clientManager.stop()
         powerManager.stop()
         connectionTracker.stop()
 
