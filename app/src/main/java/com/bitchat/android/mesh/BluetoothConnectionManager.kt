@@ -445,13 +445,30 @@ class BluetoothConnectionManager(
         // subscribedDevices might still contain the device — and that's what drives
         // GATT notification delivery that keeps the ACL alive.
         connectionTracker.cleanupDeviceConnection(address)
+
+        // Patch 68: Force-close the ACL via a brief GATT client disconnect.
+        // cancelConnection() only deregisters the GATT server — Android system BLE
+        // services (serverIf 51,52,54) still hold ACL registrations, keeping the link
+        // alive for ~30s. connectGatt reuses the existing ACL (no new radio connection),
+        // then close() calls gattClientDisconnectNative which sends LL_TERMINATE_IND
+        // from the host side — the same proven mechanism Android players use.
+        try {
+            val device = bluetoothManager.adapter.getRemoteDevice(address)
+            val gatt = device.connectGatt(context, false, object : android.bluetooth.BluetoothGattCallback() {})
+            gatt?.disconnect()
+            gatt?.close()
+            Log.i(TAG, "Patch 68: Force-closed ACL via client disconnect for $address")
+        } catch (e: Exception) {
+            Log.w(TAG, "Patch 68: Failed to force-close ACL for $address: ${e.message}")
+        }
+
         // Audit
         try {
             val stackDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
             val stackMACs = stackDevices.joinToString(", ") { it.address }
             val trackerCount = connectionTracker.getConnectedDevices().size
             val subscribedCount = connectionTracker.getSubscribedDevices().size
-            Log.i(TAG, "Patch 65b: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount, subscribed: $subscribedCount")
+            Log.i(TAG, "Patch 68: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount, subscribed: $subscribedCount")
         } catch (_: Exception) { }
     }
 
