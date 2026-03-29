@@ -453,37 +453,38 @@ class BluetoothConnectionManager(
         // GATT notification delivery that keeps the ACL alive.
         connectionTracker.cleanupDeviceConnection(address)
 
-        // Patch 68: Force-close the ACL via a brief GATT client disconnect.
+        // Patch 68c: Force-close the ACL via a brief GATT client disconnect.
         // cancelConnection() only deregisters the GATT server — Android system BLE
         // services (serverIf 51,52,54) still hold ACL registrations, keeping the link
         // alive for ~30s. connectGatt reuses the existing ACL (no new radio connection),
-        // then disconnect()+close() sends LL_TERMINATE_IND from the host side.
-        // IMPORTANT: Must wait for onConnectionStateChange(CONNECTED) before closing —
-        // close() before the client registers has no effect on the ACL.
+        // then disconnect() sends LL_TERMINATE_IND from the host side.
+        // CRITICAL: close() must be called ONLY in the DISCONNECTED callback, NOT
+        // immediately after disconnect(). Calling close() too early destroys the GATT
+        // client interface before the LL_TERMINATE_IND can be sent.
         try {
             val device = bluetoothManager.adapter.getRemoteDevice(address)
             val gatt = device.connectGatt(context, false, object : android.bluetooth.BluetoothGattCallback() {
                 override fun onConnectionStateChange(gatt: android.bluetooth.BluetoothGatt, status: Int, newState: Int) {
-                    Log.i(TAG, "Patch 68: GATT client onConnectionStateChange — status=$status, newState=$newState for $address")
+                    Log.i(TAG, "Patch 68c: GATT client state=$newState status=$status for $address")
                     if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
-                        Log.i(TAG, "Patch 68: Client connected to existing ACL, now closing to send LL_TERMINATE_IND")
+                        // Connected to existing ACL — send LL_TERMINATE_IND
+                        Log.i(TAG, "Patch 68c: Client connected, sending disconnect (LL_TERMINATE_IND)")
                         gatt.disconnect()
-                        gatt.close()
-                        Log.i(TAG, "Patch 68: ACL force-closed for $address")
+                        // Do NOT call close() here — wait for DISCONNECTED callback
                     } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
-                        // Connection failed or already disconnected — just clean up
+                        // Disconnect complete (LL_TERMINATE_IND sent) — NOW safe to close
                         gatt.close()
-                        Log.i(TAG, "Patch 68: Client disconnected (status=$status), closed GATT for $address")
+                        Log.i(TAG, "Patch 68c: ACL force-closed for $address (status=$status)")
                     }
                 }
             }, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
             if (gatt != null) {
-                Log.i(TAG, "Patch 68: GATT client connect initiated for $address, waiting for callback")
+                Log.i(TAG, "Patch 68c: GATT client connect initiated for $address, waiting for callback")
             } else {
-                Log.w(TAG, "Patch 68: connectGatt returned null for $address")
+                Log.w(TAG, "Patch 68c: connectGatt returned null for $address")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Patch 68: Failed to initiate GATT client for $address: ${e.message}")
+            Log.w(TAG, "Patch 68c: Failed to initiate GATT client for $address: ${e.message}")
         }
 
         // Audit
