@@ -96,6 +96,16 @@ class BluetoothMeshService(
         connectionManager.disconnectPeer(peerId)
     }
 
+    /** Look up the BLE MAC for a peer ID before a LEAVE packet can clear the mapping. */
+    fun getMacForPeer(peerId: String): String? {
+        return connectionManager.getMacForPeer(peerId)
+    }
+
+    /** Disconnect by saved MAC address, bypassing addressPeerMap lookup. */
+    fun disconnectByAddress(address: String) {
+        connectionManager.disconnectByAddress(address)
+    }
+
     /** Patch 40: Enable host mode — disables scanning and outbound client connections.
      *  Must be set BEFORE calling startServices(). */
     var hostMode: Boolean

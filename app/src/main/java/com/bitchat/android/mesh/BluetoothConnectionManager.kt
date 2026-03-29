@@ -413,6 +413,44 @@ class BluetoothConnectionManager(
      *  from addressPeerMap, then disconnects both GATT client and server connections.
      *  Patch 61 added server-side disconnect to ensure the host tears down inbound connections
      *  from departed peers, preventing stale ACL links that block reconnection. */
+    /** Look up the BLE MAC address for a peer ID. Returns null if not in addressPeerMap. */
+    fun getMacForPeer(peerId: String): String? {
+        return addressPeerMap.entries.find { it.value == peerId }?.key
+    }
+
+    /** Disconnect a device by MAC address directly, bypassing addressPeerMap lookup.
+     *  Used when the MAC was captured before a LEAVE packet could clear the mapping. */
+    fun disconnectByAddress(address: String) {
+        val conn = connectionTracker.getConnectedDevices()[address]
+        if (conn != null) {
+            if (conn.isClient) {
+                try { conn.gatt?.disconnect() } catch (_: Exception) { }
+                try { conn.gatt?.close() } catch (_: Exception) { }
+            } else {
+                serverManager.disconnectDevice(conn.device)
+            }
+            connectionTracker.cleanupDeviceConnection(address)
+            Log.i(TAG, "Patch 65b: Disconnected device at $address (client=${conn.isClient})")
+        } else {
+            // Connection already cleaned up by LEAVE handler, but try server cancel anyway
+            // in case the raw GATT/ACL link persists
+            try {
+                val device = bluetoothManager.adapter.getRemoteDevice(address)
+                serverManager.disconnectDevice(device)
+                Log.i(TAG, "Patch 65b: Force-cancelled server connection at $address (no tracker entry)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Patch 65b: Failed to cancel connection at $address: ${e.message}")
+            }
+        }
+        // Audit
+        try {
+            val stackDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+            val stackMACs = stackDevices.joinToString(", ") { it.address }
+            val trackerCount = connectionTracker.getConnectedDevices().size
+            Log.i(TAG, "Patch 65b: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount devices")
+        } catch (_: Exception) { }
+    }
+
     fun disconnectPeer(peerId: String) {
         val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: run {
             Log.i(TAG, "Patch 59/61: No addressPeerMap entry for departed peer ${peerId.take(8)}")
