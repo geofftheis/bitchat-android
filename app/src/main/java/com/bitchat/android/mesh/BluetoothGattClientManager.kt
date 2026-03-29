@@ -99,10 +99,19 @@ class BluetoothGattClientManager(
     // Patch 71: Approved peer prefixes — only connect outbound to peers in this list.
     // Populated from the game's player list on every LobbySync. Empty = allow all.
     var approvedPeerPrefixes: Set<String> = emptySet()
+        set(value) {
+            field = value
+            // Patch 72b: Prune rejected peers that are no longer approved (they left the game)
+            rejectedPeerPrefixes.retainAll(value)
+        }
 
     // Patch 72: Track last message received time per outbound (client) connection.
     // Used to detect phantom connections where the remote device rejected our subscription.
     private val lastMessageFromClient = ConcurrentHashMap<String, Long>()  // MAC → timestamp ms
+
+    // Patch 72b: Peers whose outbound connections were closed as stale.
+    // Prevents reconnection cycles. Pruned when approved list changes.
+    private val rejectedPeerPrefixes = mutableSetOf<String>()
 
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
     // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
@@ -162,6 +171,7 @@ class BluetoothGattClientManager(
 
         isActive = false
         lastMessageFromClient.clear()
+        rejectedPeerPrefixes.clear()
 
         // Stop synchronously so cleanup isn't skipped if connectionScope
         // is cancelled before this coroutine executes.
@@ -456,6 +466,11 @@ class BluetoothGattClientManager(
                 return
             }
         }
+        // Patch 72b: Skip peers whose previous connection was closed as stale
+        if (!isReservedPeer && peerID != null && rejectedPeerPrefixes.any { peerID.startsWith(it) }) {
+            Log.d(TAG, "Patch 72b: Skipping rejected peer $peerID ($deviceAddress)")
+            return
+        }
 
         // Patch 40: Check configurable client connection limit instead of PowerManager default.
         val maxClient = maxClientConnections
@@ -510,6 +525,8 @@ class BluetoothGattClientManager(
                 conn.gatt?.close()
                 connectionTracker.cleanupDeviceConnection(address)
                 lastMessageFromClient.remove(address)
+                // Patch 72b: Prevent reconnection cycle
+                conn.peerID?.take(8)?.let { rejectedPeerPrefixes.add(it) }
             }
         }
     }
