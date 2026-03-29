@@ -290,6 +290,10 @@ class BluetoothGattServerManager(
                     val totalGameConnections = currentServerCount + clientCount
                     if (currentServerCount >= maxServerConnections || totalGameConnections >= maxTotalConnections) {
                         Log.d(TAG, "Server: Ignoring subscription from ${device.address} (server: $currentServerCount/$maxServerConnections, total: $totalGameConnections/$maxTotalConnections)")
+                    } else if (connectionTracker.getConnectedDevices().containsKey(device.address)) {
+                        // Already tracked from a previous subscription write (e.g., device
+                        // subscribed to both notifications and indications). Skip duplicate.
+                        Log.d(TAG, "Server: Ignoring duplicate subscription from ${device.address}")
                     } else {
                         // Patch 62: Track the device in connectedDevices now that it has
                         // subscribed. This is the point where we know it's a real game
