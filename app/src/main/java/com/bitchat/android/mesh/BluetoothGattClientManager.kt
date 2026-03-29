@@ -100,6 +100,10 @@ class BluetoothGattClientManager(
     // Populated from the game's player list on every LobbySync. Empty = allow all.
     var approvedPeerPrefixes: Set<String> = emptySet()
 
+    // Patch 72: Track last message received time per outbound (client) connection.
+    // Used to detect phantom connections where the remote device rejected our subscription.
+    private val lastMessageFromClient = ConcurrentHashMap<String, Long>()  // MAC → timestamp ms
+
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
     // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
 
@@ -157,6 +161,7 @@ class BluetoothGattClientManager(
         }
 
         isActive = false
+        lastMessageFromClient.clear()
 
         // Stop synchronously so cleanup isn't skipped if connectionScope
         // is cancelled before this coroutine executes.
@@ -485,6 +490,31 @@ class BluetoothGattClientManager(
     }
     
     /**
+     * Patch 72: Close outbound client connections that haven't received any messages
+     * within the stale threshold. These are phantom connections where the remote
+     * device rejected our subscription. Since we're the central (client), gatt.close()
+     * will properly tear down the ACL.
+     */
+    fun cleanupStaleOutboundConnections(staleThresholdMs: Long = 6000) {
+        val now = System.currentTimeMillis()
+        val clientConnections = connectionTracker.getConnectedDevices().filter { it.value.isClient }
+        for ((address, conn) in clientConnections) {
+            // Skip the host connection — never auto-close it
+            if (reservedPeerPrefix.isNotEmpty() && conn.peerID?.startsWith(reservedPeerPrefix) == true) {
+                continue
+            }
+            val lastMsg = lastMessageFromClient[address]
+            if (lastMsg != null && now - lastMsg > staleThresholdMs) {
+                Log.i(TAG, "Patch 72: Closing stale outbound to $address (peer=${conn.peerID?.take(8)}, silent for ${now - lastMsg}ms)")
+                conn.gatt?.disconnect()
+                conn.gatt?.close()
+                connectionTracker.cleanupDeviceConnection(address)
+                lastMessageFromClient.remove(address)
+            }
+        }
+    }
+
+    /**
      * Connect to a device as GATT client
      */
     @Suppress("DEPRECATION")
@@ -620,6 +650,8 @@ class BluetoothGattClientManager(
             
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 val value = characteristic.value
+                // Patch 72: Track last message time for stale connection detection
+                lastMessageFromClient[gatt.device.address] = System.currentTimeMillis()
                 Log.i(TAG, "Client: Received packet from ${gatt.device.address}, size: ${value.size} bytes")
                 val packet = BitchatPacket.fromBinaryData(value)
                 if (packet != null) {
@@ -638,6 +670,8 @@ class BluetoothGattClientManager(
                 if (descriptor.uuid == AppConstants.Mesh.Gatt.DESCRIPTOR_UUID) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         Log.i(TAG, "Client: Indication subscription confirmed for $addr")
+                        // Patch 72: Initialize last-message timestamp (grace period)
+                        lastMessageFromClient[addr] = System.currentTimeMillis()
                         connectionTracker.getDeviceConnection(addr)?.let { conn ->
                             connectionTracker.updateDeviceConnection(addr, conn.copy(descriptorWriteConfirmed = true))
                         }

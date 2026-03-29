@@ -496,6 +496,11 @@ class BluetoothConnectionManager(
         } catch (_: Exception) { }
     }
 
+    /** Patch 72: Close stale outbound connections. */
+    fun cleanupStaleOutboundConnections() {
+        clientManager.cleanupStaleOutboundConnections()
+    }
+
     fun disconnectPeer(peerId: String) {
         val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: run {
             Log.i(TAG, "Patch 59/61: No addressPeerMap entry for departed peer ${peerId.take(8)}")

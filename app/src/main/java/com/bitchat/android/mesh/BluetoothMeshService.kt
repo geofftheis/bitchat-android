@@ -137,6 +137,11 @@ class BluetoothMeshService(
         get() = connectionManager.approvedPeerPrefixes
         set(value) { connectionManager.approvedPeerPrefixes = value }
 
+    /** Patch 72: Close stale outbound connections that haven't received messages. */
+    fun cleanupStaleOutboundConnections() {
+        connectionManager.cleanupStaleOutboundConnections()
+    }
+
     /** Patch 52: When false, this device will not relay packets for other peers. */
     var relayEnabled: Boolean
         get() = packetProcessor.packetRelayManager.relayEnabled
