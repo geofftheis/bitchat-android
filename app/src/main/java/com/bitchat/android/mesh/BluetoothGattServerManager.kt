@@ -182,9 +182,16 @@ class BluetoothGattServerManager(
                     return
                 }
                 
+                // Audit: how many devices does the BLE stack think are connected?
+                val stackDevices = try {
+                    bluetoothManager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
+                } catch (_: Exception) { emptyList() }
+                val stackCount = stackDevices.size
+                val stackMACs = stackDevices.joinToString(", ") { it.address }
+
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
-                        Log.i(TAG, "Server: Device connected ${device.address}")
+                        Log.i(TAG, "Server: Device connected ${device.address} (BLE stack reports $stackCount devices: $stackMACs)")
 
                         // Patch 58: When maxServerConnections=0 (pre-lobby joining player),
                         // immediately reject inbound ACL connections. Without this, the ACL
@@ -205,7 +212,7 @@ class BluetoothGattServerManager(
                         Log.i(TAG, "Server: ACL connected from ${device.address} — awaiting subscription")
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
-                        Log.i(TAG, "Server: Device disconnected ${device.address}")
+                        Log.i(TAG, "Server: Device disconnected ${device.address} (BLE stack reports $stackCount devices: $stackMACs)")
                         connectionTracker.cleanupDeviceConnection(device.address)
                         // Notify delegate about device disconnection so higher layers can update direct flags
                         delegate?.onDeviceDisconnected(device)

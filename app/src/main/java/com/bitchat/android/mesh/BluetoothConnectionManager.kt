@@ -414,7 +414,10 @@ class BluetoothConnectionManager(
      *  Patch 61 added server-side disconnect to ensure the host tears down inbound connections
      *  from departed peers, preventing stale ACL links that block reconnection. */
     fun disconnectPeer(peerId: String) {
-        val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: return
+        val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: run {
+            Log.i(TAG, "Patch 59/61: No addressPeerMap entry for departed peer ${peerId.take(8)}")
+            return
+        }
         val conn = connectionTracker.getConnectedDevices()[address]
         if (conn != null) {
             if (conn.isClient) {
@@ -430,6 +433,13 @@ class BluetoothConnectionManager(
         } else {
             Log.i(TAG, "Patch 59/61: No active connection for departed peer ${peerId.take(8)} at $address")
         }
+        // Audit: log what the BLE stack thinks is still connected after our disconnect
+        try {
+            val stackDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+            val stackMACs = stackDevices.joinToString(", ") { it.address }
+            val trackerCount = connectionTracker.getConnectedDevices().size
+            Log.i(TAG, "Patch 59/61: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount devices")
+        } catch (_: Exception) { }
     }
 
     // Optionally disconnect all connections (server and client)
