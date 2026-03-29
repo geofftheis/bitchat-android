@@ -319,12 +319,13 @@ class BluetoothConnectionTracker(
      * Clean up a specific device connection
      */
     fun cleanupDeviceConnection(deviceAddress: String) {
-        connectedDevices.remove(deviceAddress)?.let { deviceConn ->
-            subscribedDevices.removeAll { it.address == deviceAddress }
-            // Half-Wit Patch 19: Don't remove addressPeerMap here.
-            // onDeviceDisconnected in BluetoothMeshService reads it to find the
-            // peer ID for markPeerDisconnected(), then removes it.
-        }
+        connectedDevices.remove(deviceAddress)
+        // Patch 65b: Always remove from subscribedDevices, even if connectedDevices
+        // entry was already cleaned up (e.g., by LEAVE handler). Without this, the
+        // device stays in subscribedDevices and keeps receiving GATT notifications,
+        // which resets the BLE supervision timeout and keeps the stale ACL alive
+        // for 20-30 seconds instead of the expected 720ms.
+        subscribedDevices.removeAll { it.address == deviceAddress }
         Log.d(TAG, "Cleaned up device connection for $deviceAddress")
     }
     
