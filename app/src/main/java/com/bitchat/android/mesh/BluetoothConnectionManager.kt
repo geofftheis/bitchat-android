@@ -429,11 +429,9 @@ class BluetoothConnectionManager(
             } else {
                 serverManager.disconnectDevice(conn.device)
             }
-            connectionTracker.cleanupDeviceConnection(address)
             Log.i(TAG, "Patch 65b: Disconnected device at $address (client=${conn.isClient})")
         } else {
             // Connection already cleaned up by LEAVE handler, but try server cancel anyway
-            // in case the raw GATT/ACL link persists
             try {
                 val device = bluetoothManager.adapter.getRemoteDevice(address)
                 serverManager.disconnectDevice(device)
@@ -442,12 +440,18 @@ class BluetoothConnectionManager(
                 Log.w(TAG, "Patch 65b: Failed to cancel connection at $address: ${e.message}")
             }
         }
+        // Always clean up tracker + subscribedDevices regardless of which branch ran.
+        // The LEAVE handler may have already removed from connectedDevices, but
+        // subscribedDevices might still contain the device — and that's what drives
+        // GATT notification delivery that keeps the ACL alive.
+        connectionTracker.cleanupDeviceConnection(address)
         // Audit
         try {
             val stackDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
             val stackMACs = stackDevices.joinToString(", ") { it.address }
             val trackerCount = connectionTracker.getConnectedDevices().size
-            Log.i(TAG, "Patch 65b: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount devices")
+            val subscribedCount = connectionTracker.getSubscribedDevices().size
+            Log.i(TAG, "Patch 65b: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount, subscribed: $subscribedCount")
         } catch (_: Exception) { }
     }
 
