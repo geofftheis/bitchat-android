@@ -189,7 +189,7 @@ class BluetoothConnectionManager(
             // Patch 40: Use role-aware connection limits instead of PowerManager defaults.
             // Host: 0 client, up to maxServerConnections server.
             // Player: up to maxClientConnections client, up to maxServerConnections server.
-            val maxClient = if (hostMode) 0 else maxClientConnections
+            val maxClient = maxClientConnections
             val maxServer = maxServerConnections
             // Patch 50: maxTotalConnections caps the combined limit when set
             val maxOverall = minOf(maxClient + maxServer, maxTotalConnections)
@@ -274,10 +274,10 @@ class BluetoothConnectionManager(
                 delay(300)
                 enforceStrictLimits()
 
-                // Patch 40: Host mode skips client manager (no scanning, no outbound connections).
-                // Host only accepts inbound connections via the GATT server.
-                if (hostMode) {
-                    Log.i(TAG, "Host mode: skipping GATT Client (server-only)")
+                // Patch 73: Skip client manager when no outbound connections allowed.
+                // In star topology: host has maxClient=9 (starts client), player has maxClient=0 (skips).
+                if (maxClientConnections <= 0) {
+                    Log.i(TAG, "Patch 73: maxClientConnections=0, skipping GATT Client (server-only)")
                 } else {
                     if (!clientManager.start()) {
                         Log.e(TAG, "Failed to start client manager")
