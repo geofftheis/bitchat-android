@@ -96,23 +96,6 @@ class BluetoothGattClientManager(
     // (maxClientConnections - 1) slots until the reserved peer is connected.
     var reservedPeerPrefix: String = ""
 
-    // Patch 71: Approved peer prefixes — only connect outbound to peers in this list.
-    // Populated from the game's player list on every LobbySync. Empty = allow all.
-    var approvedPeerPrefixes: Set<String> = emptySet()
-        set(value) {
-            field = value
-            // Patch 72b: Prune rejected peers that are no longer approved (they left the game)
-            rejectedPeerPrefixes.retainAll(value)
-        }
-
-    // Patch 72: Track last message received time per outbound (client) connection.
-    // Used to detect phantom connections where the remote device rejected our subscription.
-    private val lastMessageFromClient = ConcurrentHashMap<String, Long>()  // MAC → timestamp ms
-
-    // Patch 72b: Peers whose outbound connections were closed as stale.
-    // Prevents reconnection cycles. Pruned when approved list changes.
-    private val rejectedPeerPrefixes = mutableSetOf<String>()
-
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
     // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
 
@@ -170,8 +153,6 @@ class BluetoothGattClientManager(
         }
 
         isActive = false
-        lastMessageFromClient.clear()
-        rejectedPeerPrefixes.clear()
 
         // Stop synchronously so cleanup isn't skipped if connectionScope
         // is cancelled before this coroutine executes.
@@ -456,22 +437,6 @@ class BluetoothGattClientManager(
             return
         }
         
-        // Patch 71: Only connect to approved peers (if list is populated).
-        // The host (reservedPeerPrefix) always bypasses this check.
-        val isReservedPeer = peerID != null && reservedPeerPrefix.isNotEmpty() && peerID.startsWith(reservedPeerPrefix)
-        if (!isReservedPeer && approvedPeerPrefixes.isNotEmpty()) {
-            val isApproved = peerID != null && approvedPeerPrefixes.any { peerID.startsWith(it) }
-            if (!isApproved) {
-                Log.d(TAG, "Patch 71: Skipping unapproved peer $peerID (${deviceAddress})")
-                return
-            }
-        }
-        // Patch 72b: Skip peers whose previous connection was closed as stale
-        if (!isReservedPeer && peerID != null && rejectedPeerPrefixes.any { peerID.startsWith(it) }) {
-            Log.d(TAG, "Patch 72b: Skipping rejected peer $peerID ($deviceAddress)")
-            return
-        }
-
         // Patch 40: Check configurable client connection limit instead of PowerManager default.
         val maxClient = maxClientConnections
         // Patch 50: maxTotalConnections caps the combined limit when set
@@ -482,7 +447,7 @@ class BluetoothGattClientManager(
         // Patch 53a: Removed maxClient > 1 guard so reservation works with a single
         // slot (blocks non-host peers entirely pre-lobby).
         val effectiveMaxClient = if (reservedPeerPrefix.isNotEmpty()) {
-            // isReservedPeer already computed above (Patch 71)
+            val isReservedPeer = peerID != null && peerID.startsWith(reservedPeerPrefix)
             val hostAlreadyConnected = connectionTracker.addressPeerMap.values.any { it.startsWith(reservedPeerPrefix) }
             if (isReservedPeer || hostAlreadyConnected) {
                 maxClient // Full budget for the reserved peer, or if host already connected
@@ -504,33 +469,6 @@ class BluetoothGattClientManager(
         }
     }
     
-    /**
-     * Patch 72: Close outbound client connections that haven't received any messages
-     * within the stale threshold. These are phantom connections where the remote
-     * device rejected our subscription. Since we're the central (client), gatt.close()
-     * will properly tear down the ACL.
-     */
-    fun cleanupStaleOutboundConnections(staleThresholdMs: Long = 6000) {
-        val now = System.currentTimeMillis()
-        val clientConnections = connectionTracker.getConnectedDevices().filter { it.value.isClient }
-        for ((address, conn) in clientConnections) {
-            // Skip the host connection — never auto-close it
-            if (reservedPeerPrefix.isNotEmpty() && conn.peerID?.startsWith(reservedPeerPrefix) == true) {
-                continue
-            }
-            val lastMsg = lastMessageFromClient[address]
-            if (lastMsg != null && now - lastMsg > staleThresholdMs) {
-                Log.i(TAG, "Patch 72: Closing stale outbound to $address (peer=${conn.peerID?.take(8)}, silent for ${now - lastMsg}ms)")
-                conn.gatt?.disconnect()
-                conn.gatt?.close()
-                connectionTracker.cleanupDeviceConnection(address)
-                lastMessageFromClient.remove(address)
-                // Patch 72b: Prevent reconnection cycle
-                conn.peerID?.take(8)?.let { rejectedPeerPrefixes.add(it) }
-            }
-        }
-    }
-
     /**
      * Connect to a device as GATT client
      */
@@ -667,8 +605,6 @@ class BluetoothGattClientManager(
             
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 val value = characteristic.value
-                // Patch 72: Track last message time for stale connection detection
-                lastMessageFromClient[gatt.device.address] = System.currentTimeMillis()
                 Log.i(TAG, "Client: Received packet from ${gatt.device.address}, size: ${value.size} bytes")
                 val packet = BitchatPacket.fromBinaryData(value)
                 if (packet != null) {
@@ -687,8 +623,6 @@ class BluetoothGattClientManager(
                 if (descriptor.uuid == AppConstants.Mesh.Gatt.DESCRIPTOR_UUID) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         Log.i(TAG, "Client: Indication subscription confirmed for $addr")
-                        // Patch 72: Initialize last-message timestamp (grace period)
-                        lastMessageFromClient[addr] = System.currentTimeMillis()
                         connectionTracker.getDeviceConnection(addr)?.let { conn ->
                             connectionTracker.updateDeviceConnection(addr, conn.copy(descriptorWriteConfirmed = true))
                         }
