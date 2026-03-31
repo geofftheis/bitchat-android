@@ -258,13 +258,32 @@ class BluetoothConnectionManager(
                 }
                 Log.d(TAG, "GATT Server started")
 
-                // Patch 58b: Evict stale connections from a previous transport session.
-                // When the GATT server opens, the BLE stack fires onConnectionStateChange
-                // for surviving ACL links, adding them to the tracker. A brief delay lets
-                // those callbacks arrive before we enforce limits. Without this, stale
-                // connections consume the maxTotalConnections budget and block new outbound
-                // connections to the host.
+                // Patch 58b + Patch 75: Evict ALL stale connections from a previous
+                // transport session. When the GATT server opens, the BLE stack fires
+                // onConnectionStateChange for surviving ACL links, adding them to the
+                // tracker. A brief delay lets those callbacks arrive.
+                //
+                // Patch 75: Disconnect unconditionally — at startup, every existing
+                // connection is stale by definition (no new peers have connected yet).
+                // The previous Patch 58b only evicted connections exceeding limits, but
+                // when the same BLE service UUID is reused across games, a single stale
+                // ACL link can block the radio and prevent the new host from connecting
+                // inbound, even though it's "within limits" (1 ≤ maxServerConnections).
                 delay(300)
+                try {
+                    val staleDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+                    if (staleDevices.isNotEmpty()) {
+                        Log.i(TAG, "Patch 75: Disconnecting ${staleDevices.size} stale connections at startup")
+                        for (device in staleDevices) {
+                            Log.d(TAG, "Patch 75: Disconnecting stale device ${device.address}")
+                            serverManager.disconnectDevice(device)
+                        }
+                        // Brief delay for BLE stack to process disconnects before proceeding
+                        delay(200)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Patch 75: Error cleaning stale connections: ${e.message}")
+                }
                 enforceStrictLimits()
 
                 // Patch 73: Skip client manager when no outbound connections allowed.
