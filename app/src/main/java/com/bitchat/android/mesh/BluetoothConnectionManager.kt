@@ -459,19 +459,44 @@ class BluetoothConnectionManager(
                 Log.w(TAG, "Patch 65b: Failed to cancel connection at $address: ${e.message}")
             }
         }
+        // Patch 76: Always cancel the server-side connection too. When a client
+        // connection shares an ACL link with a phantom server connection (e.g. from
+        // Patch 58 rejection), disconnecting only the client side leaves the server
+        // phantom in the BLE stack, poisoning future outbound connections.
+        if (conn?.isClient == true) {
+            try {
+                val device = bluetoothManager.adapter.getRemoteDevice(address)
+                serverManager.disconnectDevice(device)
+            } catch (_: Exception) { }
+        }
         // Always clean up tracker + subscribedDevices regardless of which branch ran.
         // The LEAVE handler may have already removed from connectedDevices, but
         // subscribedDevices might still contain the device — and that's what drives
         // GATT notification delivery that keeps the ACL alive.
         connectionTracker.cleanupDeviceConnection(address)
 
-        // Audit
+        // Audit + evict phantoms
         try {
             val stackDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
             val stackMACs = stackDevices.joinToString(", ") { it.address }
             val trackerCount = connectionTracker.getConnectedDevices().size
             val subscribedCount = connectionTracker.getSubscribedDevices().size
             Log.i(TAG, "Patch 68: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount, subscribed: $subscribedCount")
+
+            // Patch 76: If the BLE stack still reports devices that our tracker doesn't
+            // know about, they are phantoms left over from a shared ACL link (e.g. Patch 58
+            // cancelConnection on the server side while the client side kept the ACL alive).
+            // These phantoms poison the BLE stack and cause all subsequent outbound GATT
+            // connections to fail with status 133. Evict them now.
+            val trackedAddresses = connectionTracker.getConnectedDevices().keys
+            val phantomDevices = stackDevices.filter { it.address !in trackedAddresses }
+            if (phantomDevices.isNotEmpty()) {
+                Log.i(TAG, "Patch 76: Evicting ${phantomDevices.size} phantom devices from BLE stack")
+                for (device in phantomDevices) {
+                    Log.d(TAG, "Patch 76: Evicting phantom device ${device.address}")
+                    serverManager.disconnectDevice(device)
+                }
+            }
         } catch (_: Exception) { }
     }
 
@@ -490,6 +515,13 @@ class BluetoothConnectionManager(
                 // Server-side (inbound): cancel connection via GATT server
                 serverManager.disconnectDevice(conn.device)
             }
+            // Patch 76: Also cancel the server side if this was a client connection
+            if (conn.isClient) {
+                try {
+                    val device = bluetoothManager.adapter.getRemoteDevice(address)
+                    serverManager.disconnectDevice(device)
+                } catch (_: Exception) { }
+            }
             connectionTracker.cleanupDeviceConnection(address)
             Log.i(TAG, "Patch 59/61: Disconnected departed peer ${peerId.take(8)} at $address (client=${conn.isClient})")
         } else {
@@ -501,6 +533,17 @@ class BluetoothConnectionManager(
             val stackMACs = stackDevices.joinToString(", ") { it.address }
             val trackerCount = connectionTracker.getConnectedDevices().size
             Log.i(TAG, "Patch 59/61: Post-disconnect audit — BLE stack: ${stackDevices.size} devices ($stackMACs), tracker: $trackerCount devices")
+
+            // Patch 76: Evict phantom devices (see disconnectByAddress for full explanation)
+            val trackedAddresses = connectionTracker.getConnectedDevices().keys
+            val phantomDevices = stackDevices.filter { it.address !in trackedAddresses }
+            if (phantomDevices.isNotEmpty()) {
+                Log.i(TAG, "Patch 76: Evicting ${phantomDevices.size} phantom devices from BLE stack")
+                for (device in phantomDevices) {
+                    Log.d(TAG, "Patch 76: Evicting phantom device ${device.address}")
+                    serverManager.disconnectDevice(device)
+                }
+            }
         } catch (_: Exception) { }
     }
 
