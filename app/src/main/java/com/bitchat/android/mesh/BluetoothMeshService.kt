@@ -568,12 +568,15 @@ class BluetoothMeshService(
                                 }
                             }
 
-                            // Bind or rebind this device address to the announcing peer
-                            connectionManager.addressPeerMap[deviceAddress] = pid
-                            Log.d(TAG, "Mapped device $deviceAddress to peer $pid (TTL=${routed.packet.ttl})")
+                            // Patch 78: Skip redundant remap if mapping is unchanged
+                            val existingMapping = connectionManager.addressPeerMap[deviceAddress]
+                            if (existingMapping != pid) {
+                                connectionManager.addressPeerMap[deviceAddress] = pid
+                                Log.d(TAG, "Mapped device $deviceAddress to peer $pid (TTL=${routed.packet.ttl})")
 
-                            // Mark as directly connected - refresh UI state
-                            try { peerManager.refreshPeerList() } catch (_: Exception) { }
+                                // Mark as directly connected - refresh UI state
+                                try { peerManager.refreshPeerList() } catch (_: Exception) { }
+                            }
 
                             // Half-Wit Patch 8: scheduleInitialSyncToPeer disabled.
                             // Gossip sync is off (Patch 8) but the initial sync path was
