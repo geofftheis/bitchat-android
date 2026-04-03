@@ -269,7 +269,7 @@ class BluetoothConnectionManager(
                 // when the same BLE service UUID is reused across games, a single stale
                 // ACL link can block the radio and prevent the new host from connecting
                 // inbound, even though it's "within limits" (1 ≤ maxServerConnections).
-                delay(300)
+                delay(75) // Patch 82: Reduced from 300ms to 75ms — see BITCHAT_PATCHES.md
                 try {
                     val staleDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
                     if (staleDevices.isNotEmpty()) {
