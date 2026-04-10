@@ -1,20 +1,22 @@
 package com.bitchat.android.mesh
 
 import android.bluetooth.*
-import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.util.AppConstants
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.*
 import kotlin.coroutines.resume
 
@@ -51,7 +53,11 @@ class BluetoothGattServerManager(
     // GATT server for peripheral mode
     private var gattServer: BluetoothGattServer? = null
     private var characteristic: BluetoothGattCharacteristic? = null
-    private var advertiseCallback: AdvertiseCallback? = null
+    // Patch 86b: Migrated from legacy AdvertiseCallback to AdvertisingSet API.
+    // Each startAdvertisingSet() call gets a fresh random BLE address from the
+    // controller, preventing phantom ACL address pinning on Pixel 9 Pro.
+    private var currentAdvertisingSet: AdvertisingSet? = null
+    private var advertisingSetCallback: AdvertisingSetCallback? = null
     
     // State management
     private var isActive = false
@@ -62,6 +68,9 @@ class BluetoothGattServerManager(
     // radio but can never be stopped. Cancelling the previous Job before launching a new
     // one ensures only one restart is in-flight at a time.
     private var restartJob: Job? = null
+
+    // Patch 86: Signals when onServiceAdded fires with GATT_SUCCESS.
+    private var serviceReady = CompletableDeferred<Boolean>()
 
     // Optional game metadata byte for Half-Wit advertisement (Patch 26)
     // Bit 7: locked flag, Bits 0-3: player count
@@ -108,13 +117,15 @@ class BluetoothGattServerManager(
         }
         
         isActive = true
-        
+        serviceReady = CompletableDeferred() // Patch 86: Reset for this start cycle
+
+        // Patch 86: Only set up the GATT server here. Advertising is deferred
+        // until BluetoothConnectionManager calls beginAdvertising() after
+        // stale ACL eviction is complete.
         connectionScope.launch {
             setupGattServer()
-            delay(300) // Brief delay to ensure GATT server is ready
-            startAdvertising()
         }
-        
+
         return true
     }
     
@@ -139,6 +150,11 @@ class BluetoothGattServerManager(
 
         isActive = false
 
+        // Patch 86: Cancel any pending awaitServiceReady() callers
+        if (serviceReady.isActive) {
+            serviceReady.cancel()
+        }
+
         // Stop advertising and close GATT server synchronously so they aren't
         // skipped when connectionScope is cancelled immediately after stop().
         stopAdvertising()
@@ -156,7 +172,34 @@ class BluetoothGattServerManager(
 
         Log.i(TAG, "GATT server stopped")
     }
-    
+
+    /**
+     * Patch 86: Suspend until onServiceAdded fires, with timeout.
+     * Returns true if the GATT service was added successfully within the deadline.
+     */
+    suspend fun awaitServiceReady(timeoutMs: Long = 2000): Boolean {
+        return try {
+            withTimeoutOrNull(timeoutMs) { serviceReady.await() } ?: run {
+                Log.w(TAG, "Patch 86: awaitServiceReady timed out after ${timeoutMs}ms")
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Patch 86: awaitServiceReady failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Patch 86: Start advertising. Called by BluetoothConnectionManager after
+     * stale ACL eviction is complete, so the host discovers this device on
+     * a clean BLE radio.
+     */
+    fun beginAdvertising() {
+        connectionScope.launch {
+            startAdvertising()
+        }
+    }
+
     /**
      * Get GATT server instance
      */
@@ -229,8 +272,10 @@ class BluetoothGattServerManager(
                 
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.d(TAG, "Server: Service added successfully: ${service.uuid}")
+                    serviceReady.complete(true) // Patch 86
                 } else {
                     Log.e(TAG, "Server: Failed to add service: ${service.uuid}, status: $status")
+                    serviceReady.complete(false) // Patch 86: unblock waiters on failure
                 }
             }
             
@@ -382,12 +427,12 @@ class BluetoothGattServerManager(
      * Start advertising
      */
     /**
-     * Patch 36: Start advertising with retry logic. Retries up to 10 times at 100ms
-     * intervals when all BLE advertising slots are occupied (error code 4:
-     * ADVERTISE_FAILED_TOO_MANY_ADVERTISERS). If all attempts fail, invokes the
-     * onAdvertisingFailed callback so the app can notify the user.
+     * Patch 36 + 86b: Start advertising with retry logic using the AdvertisingSet API.
+     * Each startAdvertisingSet() call creates a new advertising set with a fresh random
+     * BLE address from the controller, preventing phantom ACL address pinning on Pixel 9 Pro.
+     * Retries up to 10 times at 100ms intervals when all BLE advertising slots are occupied.
+     * If all attempts fail, invokes the onAdvertisingFailed callback.
      */
-    @Suppress("DEPRECATION")
     private suspend fun startAdvertising() {
         // Guard conditions – never throw here to avoid crashing the app from a background coroutine
         if (!permissionManager.hasBluetoothPermissions()) {
@@ -411,7 +456,7 @@ class BluetoothGattServerManager(
             return
         }
 
-        val settings = powerManager.getAdvertiseSettings()
+        val parameters = powerManager.getAdvertisingSetParameters()
 
         val dataBuilder = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(serviceUuid))
@@ -452,22 +497,30 @@ class BluetoothGattServerManager(
 
             val result = try {
                 suspendCancellableCoroutine<Int> { cont ->
-                    val callback = object : AdvertiseCallback() {
-                        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-                            val mode = try {
-                                powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
-                            } catch (_: Exception) { "unknown" }
-                            Log.i(TAG, "Advertising started on attempt $attempt/$maxAttempts (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
-                            cont.resume(0)
+                    val callback = object : AdvertisingSetCallback() {
+                        override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
+                            if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) {
+                                currentAdvertisingSet = advertisingSet
+                                val mode = try {
+                                    powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
+                                } catch (_: Exception) { "unknown" }
+                                Log.i(TAG, "Advertising started on attempt $attempt/$maxAttempts (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
+                                cont.resume(0)
+                            } else {
+                                Log.w(TAG, "Advertising failed on attempt $attempt/$maxAttempts (status=$status)")
+                                cont.resume(status)
+                            }
                         }
 
-                        override fun onStartFailure(errorCode: Int) {
-                            Log.w(TAG, "Advertising failed on attempt $attempt/$maxAttempts (error=$errorCode)")
-                            cont.resume(errorCode)
+                        override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
+                            currentAdvertisingSet = null
                         }
                     }
-                    advertiseCallback = callback
-                    bleAdvertiser.startAdvertising(settings, data, scanResponse, callback)
+                    advertisingSetCallback = callback
+                    bleAdvertiser.startAdvertisingSet(
+                        parameters, data, scanResponse,
+                        null, null, callback
+                    )
                 }
             } catch (se: SecurityException) {
                 Log.e(TAG, "SecurityException starting advertising (missing permission?): ${se.message}")
@@ -481,8 +534,8 @@ class BluetoothGattServerManager(
 
             lastErrorCode = result
 
-            // Only retry for TOO_MANY_ADVERTISERS (error 4); other errors are not transient
-            if (result != AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
+            // Only retry for TOO_MANY_ADVERTISERS; other errors are not transient
+            if (result != AdvertisingSetCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
                 Log.e(TAG, "Advertising failed with non-retryable error: $result")
                 break
             }
@@ -497,13 +550,13 @@ class BluetoothGattServerManager(
     }
     
     /**
-     * Stop advertising
+     * Stop advertising (Patch 86b: uses AdvertisingSet API)
      */
-    @Suppress("DEPRECATION")
     private fun stopAdvertising() {
         if (!permissionManager.hasBluetoothPermissions() || bleAdvertiser == null) return
         try {
-            advertiseCallback?.let { cb -> bleAdvertiser.stopAdvertising(cb) }
+            advertisingSetCallback?.let { cb -> bleAdvertiser.stopAdvertisingSet(cb) }
+            currentAdvertisingSet = null
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping advertising: ${e.message}")
         }

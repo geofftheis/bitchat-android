@@ -256,34 +256,43 @@ class BluetoothConnectionManager(
                     this@BluetoothConnectionManager.isActive = false
                     return@launch
                 }
-                Log.d(TAG, "GATT Server started")
+                Log.d(TAG, "GATT Server started (setup in progress)")
 
-                // Patch 58b + Patch 75: Evict ALL stale connections from a previous
-                // transport session. When the GATT server opens, the BLE stack fires
-                // onConnectionStateChange for surviving ACL links, adding them to the
-                // tracker. A brief delay lets those callbacks arrive.
-                //
-                // Patch 75: Disconnect unconditionally — at startup, every existing
-                // connection is stale by definition (no new peers have connected yet).
-                // The previous Patch 58b only evicted connections exceeding limits, but
-                // when the same BLE service UUID is reused across games, a single stale
-                // ACL link can block the radio and prevent the new host from connecting
-                // inbound, even though it's "within limits" (1 ≤ maxServerConnections).
-                delay(75) // Patch 82: Reduced from 300ms to 75ms — see BITCHAT_PATCHES.md
+                // Patch 86: Wait for the GATT service to be fully registered
+                // (onServiceAdded callback) before proceeding.
+                val serviceOk = serverManager.awaitServiceReady(timeoutMs = 2000)
+                if (!serviceOk) {
+                    Log.e(TAG, "Patch 86: GATT service setup failed or timed out, continuing anyway")
+                }
+
+                // Patch 75 + 86b: Best-effort stale ACL cleanup. The phantom ACL
+                // can't be killed by GATT-level operations on Pixel 9 Pro, but the
+                // AdvertisingSet API (Patch 86b) gives us a fresh BLE address that
+                // makes the phantom irrelevant. This single-pass eviction is kept
+                // for general hygiene only.
                 try {
-                    val staleDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
-                    if (staleDevices.isNotEmpty()) {
-                        Log.i(TAG, "Patch 75: Disconnecting ${staleDevices.size} stale connections at startup")
+                    val staleDevices = bluetoothManager.getConnectedDevices(
+                        android.bluetooth.BluetoothProfile.GATT_SERVER
+                    )
+                    if (staleDevices.isEmpty()) {
+                        Log.d(TAG, "Patch 86: No stale connections at startup")
+                    } else {
+                        Log.i(TAG, "Patch 86: ${staleDevices.size} stale connection(s) at startup: " +
+                                staleDevices.joinToString { it.address } +
+                                " (phantom ACL bypassed via new BLE address)")
                         for (device in staleDevices) {
-                            Log.d(TAG, "Patch 75: Disconnecting stale device ${device.address}")
                             serverManager.disconnectDevice(device)
                         }
-                        // Brief delay for BLE stack to process disconnects before proceeding
-                        delay(200)
+                        delay(150) // Brief settle time
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Patch 75: Error cleaning stale connections: ${e.message}")
+                    Log.w(TAG, "Patch 86: Error checking stale connections: ${e.message}")
                 }
+
+                // Patch 86b: Start advertising with a fresh BLE address.
+                serverManager.beginAdvertising()
+
+                delay(100) // Brief settle time
                 enforceStrictLimits()
 
                 // Patch 73: Skip client manager when no outbound connections allowed.
