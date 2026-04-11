@@ -265,31 +265,53 @@ class BluetoothConnectionManager(
                     Log.e(TAG, "Patch 86: GATT service setup failed or timed out, continuing anyway")
                 }
 
-                // Patch 75 + 86b: Best-effort stale ACL cleanup. The phantom ACL
-                // can't be killed by GATT-level operations on Pixel 9 Pro, but the
-                // AdvertisingSet API (Patch 86b) gives us a fresh BLE address that
-                // makes the phantom irrelevant. This single-pass eviction is kept
-                // for general hygiene only.
-                try {
-                    val staleDevices = bluetoothManager.getConnectedDevices(
-                        android.bluetooth.BluetoothProfile.GATT_SERVER
-                    )
+                // Patch 88: Wait for phantom ACL to clear before advertising.
+                // On Pixel 9 Pro (Tensor G4), a phantom ACL from the previous
+                // session re-appears when the new GATT server opens. The iOS
+                // host can't connect while the phantom exists. Poll until
+                // getConnectedDevices returns empty, then advertise on a clean
+                // radio. Devices without phantoms (Pixel 7) pass immediately.
+                val phantomDeadline = System.currentTimeMillis() + 20_000
+                var phantomPollCount = 0
+                while (System.currentTimeMillis() < phantomDeadline) {
+                    val staleDevices = try {
+                        bluetoothManager.getConnectedDevices(
+                            android.bluetooth.BluetoothProfile.GATT_SERVER
+                        )
+                    } catch (_: Exception) { emptyList() }
+
                     if (staleDevices.isEmpty()) {
-                        Log.d(TAG, "Patch 86: No stale connections at startup")
-                    } else {
-                        Log.i(TAG, "Patch 86: ${staleDevices.size} stale connection(s) at startup: " +
-                                staleDevices.joinToString { it.address } +
-                                " (phantom ACL bypassed via new BLE address)")
-                        for (device in staleDevices) {
-                            serverManager.disconnectDevice(device)
+                        if (phantomPollCount == 0) {
+                            Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
+                        } else {
+                            Log.i(TAG, "Patch 88: Phantom ACL cleared after $phantomPollCount polls " +
+                                    "(${System.currentTimeMillis() - (phantomDeadline - 20_000)}ms)")
                         }
-                        delay(150) // Brief settle time
+                        break
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Patch 86: Error checking stale connections: ${e.message}")
+
+                    if (phantomPollCount == 0) {
+                        Log.i(TAG, "Patch 88: Waiting for phantom ACL to clear: " +
+                                staleDevices.joinToString { it.address })
+                    }
+                    phantomPollCount++
+                    delay(500)
                 }
 
-                // Patch 86b: Start advertising with a fresh BLE address.
+                // Log if phantom survived the full deadline
+                if (phantomPollCount > 0) {
+                    val remaining = try {
+                        bluetoothManager.getConnectedDevices(
+                            android.bluetooth.BluetoothProfile.GATT_SERVER
+                        )
+                    } catch (_: Exception) { emptyList() }
+                    if (remaining.isNotEmpty()) {
+                        Log.w(TAG, "Patch 88: Phantom ACL survived 20s deadline: " +
+                                remaining.joinToString { it.address })
+                    }
+                }
+
+                // Patch 88: Start advertising now that the radio is clean.
                 serverManager.beginAdvertising()
 
                 delay(100) // Brief settle time
