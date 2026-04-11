@@ -1,9 +1,9 @@
 package com.bitchat.android.mesh
 
 import android.bluetooth.*
+import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertisingSet
-import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.os.ParcelUuid
@@ -53,11 +53,7 @@ class BluetoothGattServerManager(
     // GATT server for peripheral mode
     private var gattServer: BluetoothGattServer? = null
     private var characteristic: BluetoothGattCharacteristic? = null
-    // Patch 86b: Migrated from legacy AdvertiseCallback to AdvertisingSet API.
-    // Each startAdvertisingSet() call gets a fresh random BLE address from the
-    // controller, preventing phantom ACL address pinning on Pixel 9 Pro.
-    private var currentAdvertisingSet: AdvertisingSet? = null
-    private var advertisingSetCallback: AdvertisingSetCallback? = null
+    private var advertiseCallback: AdvertiseCallback? = null
     
     // State management
     private var isActive = false
@@ -427,12 +423,12 @@ class BluetoothGattServerManager(
      * Start advertising
      */
     /**
-     * Patch 36 + 86b: Start advertising with retry logic using the AdvertisingSet API.
-     * Each startAdvertisingSet() call creates a new advertising set with a fresh random
-     * BLE address from the controller, preventing phantom ACL address pinning on Pixel 9 Pro.
-     * Retries up to 10 times at 100ms intervals when all BLE advertising slots are occupied.
-     * If all attempts fail, invokes the onAdvertisingFailed callback.
+     * Patch 36: Start advertising with retry logic. Retries up to 10 times at 100ms
+     * intervals when all BLE advertising slots are occupied (error code 4:
+     * ADVERTISE_FAILED_TOO_MANY_ADVERTISERS). If all attempts fail, invokes the
+     * onAdvertisingFailed callback so the app can notify the user.
      */
+    @Suppress("DEPRECATION")
     private suspend fun startAdvertising() {
         // Guard conditions – never throw here to avoid crashing the app from a background coroutine
         if (!permissionManager.hasBluetoothPermissions()) {
@@ -456,7 +452,7 @@ class BluetoothGattServerManager(
             return
         }
 
-        val parameters = powerManager.getAdvertisingSetParameters()
+        val settings = powerManager.getAdvertiseSettings()
 
         val dataBuilder = AdvertiseData.Builder()
             .addServiceUuid(ParcelUuid(serviceUuid))
@@ -497,30 +493,22 @@ class BluetoothGattServerManager(
 
             val result = try {
                 suspendCancellableCoroutine<Int> { cont ->
-                    val callback = object : AdvertisingSetCallback() {
-                        override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
-                            if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) {
-                                currentAdvertisingSet = advertisingSet
-                                val mode = try {
-                                    powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
-                                } catch (_: Exception) { "unknown" }
-                                Log.i(TAG, "Advertising started on attempt $attempt/$maxAttempts (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
-                                cont.resume(0)
-                            } else {
-                                Log.w(TAG, "Advertising failed on attempt $attempt/$maxAttempts (status=$status)")
-                                cont.resume(status)
-                            }
+                    val callback = object : AdvertiseCallback() {
+                        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+                            val mode = try {
+                                powerManager.getPowerInfo().split("Current Mode: ")[1].split("\n")[0]
+                            } catch (_: Exception) { "unknown" }
+                            Log.i(TAG, "Advertising started on attempt $attempt/$maxAttempts (power mode: $mode) with stable ID: ${peerIDBytes.joinToString("") { "%02x".format(it) }}")
+                            cont.resume(0)
                         }
 
-                        override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
-                            currentAdvertisingSet = null
+                        override fun onStartFailure(errorCode: Int) {
+                            Log.w(TAG, "Advertising failed on attempt $attempt/$maxAttempts (error=$errorCode)")
+                            cont.resume(errorCode)
                         }
                     }
-                    advertisingSetCallback = callback
-                    bleAdvertiser.startAdvertisingSet(
-                        parameters, data, scanResponse,
-                        null, null, callback
-                    )
+                    advertiseCallback = callback
+                    bleAdvertiser.startAdvertising(settings, data, scanResponse, callback)
                 }
             } catch (se: SecurityException) {
                 Log.e(TAG, "SecurityException starting advertising (missing permission?): ${se.message}")
@@ -534,8 +522,8 @@ class BluetoothGattServerManager(
 
             lastErrorCode = result
 
-            // Only retry for TOO_MANY_ADVERTISERS; other errors are not transient
-            if (result != AdvertisingSetCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
+            // Only retry for TOO_MANY_ADVERTISERS (error 4); other errors are not transient
+            if (result != AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) {
                 Log.e(TAG, "Advertising failed with non-retryable error: $result")
                 break
             }
@@ -548,15 +536,15 @@ class BluetoothGattServerManager(
         Log.e(TAG, "Advertising failed after $maxAttempts attempts (last error=$lastErrorCode)")
         onAdvertisingFailed?.invoke(lastErrorCode)
     }
-    
+
     /**
-     * Stop advertising (Patch 86b: uses AdvertisingSet API)
+     * Stop advertising
      */
+    @Suppress("DEPRECATION")
     private fun stopAdvertising() {
         if (!permissionManager.hasBluetoothPermissions() || bleAdvertiser == null) return
         try {
-            advertisingSetCallback?.let { cb -> bleAdvertiser.stopAdvertisingSet(cb) }
-            currentAdvertisingSet = null
+            advertiseCallback?.let { cb -> bleAdvertiser.stopAdvertising(cb) }
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping advertising: ${e.message}")
         }

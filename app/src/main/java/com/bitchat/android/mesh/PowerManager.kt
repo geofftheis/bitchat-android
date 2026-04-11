@@ -1,7 +1,6 @@
 package com.bitchat.android.mesh
 
 import android.bluetooth.le.AdvertiseSettings
-import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -212,39 +211,6 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
         }
     }
     
-    /**
-     * Patch 86b: Get AdvertisingSetParameters for the current power mode.
-     * Uses the extended advertising API which assigns a fresh random BLE
-     * address per advertising set, preventing phantom ACL address pinning.
-     */
-    fun getAdvertisingSetParameters(): AdvertisingSetParameters {
-        val (interval, txPower) = when (currentMode) {
-            PowerMode.PERFORMANCE -> Pair(
-                AdvertisingSetParameters.INTERVAL_MIN,   // 160 units = 100ms
-                AdvertisingSetParameters.TX_POWER_HIGH
-            )
-            PowerMode.BALANCED -> Pair(
-                400,                                      // ~250ms
-                AdvertisingSetParameters.TX_POWER_MEDIUM
-            )
-            PowerMode.POWER_SAVER -> Pair(
-                1600,                                     // ~1000ms
-                AdvertisingSetParameters.TX_POWER_LOW
-            )
-            PowerMode.ULTRA_LOW_POWER -> Pair(
-                1600,                                     // ~1000ms
-                AdvertisingSetParameters.TX_POWER_ULTRA_LOW
-            )
-        }
-        return AdvertisingSetParameters.Builder()
-            .setLegacyMode(true)       // Legacy mode required for iOS CoreBluetooth compatibility
-            .setConnectable(true)
-            .setScannable(true)        // Needed to include scan response data
-            .setInterval(interval)
-            .setTxPowerLevel(txPower)
-            .build()
-    }
-
     /**
      * Get maximum allowed connections for current power mode
      */
