@@ -295,7 +295,7 @@ class BluetoothConnectionManager(
                                 staleDevices.joinToString { it.address })
                     }
                     phantomPollCount++
-                    delay(500)
+                    delay(250)
                 }
 
                 // Log if phantom survived the full deadline
