@@ -157,6 +157,9 @@ class BluetoothMeshService(
         get() = connectionManager.hostIsAndroid
         set(value) { connectionManager.hostIsAndroid = value }
 
+    /** Patch 90: Mark a peer as recently kicked so the scanner skips it. */
+    fun addKickedPeer(peerID: String) = connectionManager.addKickedPeer(peerID)
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Tracks whether this instance has been terminated via stopServices()

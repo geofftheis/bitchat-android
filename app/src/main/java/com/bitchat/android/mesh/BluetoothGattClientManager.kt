@@ -96,6 +96,15 @@ class BluetoothGattClientManager(
     // (maxClientConnections - 1) slots until the reserved peer is connected.
     var reservedPeerPrefix: String = ""
 
+    // Patch 90: Recently kicked peer IDs — skip scan results for these peers
+    // for 60 seconds to avoid wasting connectGatt() attempts while the stale
+    // ACL is still alive (which causes status 133 errors).
+    private val recentlyKickedPeers = mutableMapOf<String, Long>()
+
+    fun addKickedPeer(peerID: String) {
+        recentlyKickedPeers[peerID] = System.currentTimeMillis()
+    }
+
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
     // Patch 42 write ACK callback removed — using WRITE_TYPE_NO_RESPONSE (fire-and-forget).
 
@@ -406,6 +415,17 @@ class BluetoothGattClientManager(
         }
 
         if (peerID != null) {
+            // Patch 90: Skip recently kicked peers to avoid status 133 errors
+            // from stale ACLs. The returning player will have a new peerID.
+            val kickedAt = recentlyKickedPeers[peerID]
+            if (kickedAt != null) {
+                if (System.currentTimeMillis() - kickedAt < 60_000) {
+                    return // Skip — recently kicked, ACL may still be stale
+                } else {
+                    recentlyKickedPeers.remove(peerID) // Expired
+                }
+            }
+
             // Log.v(TAG, "Found peerID $peerID in scan record for $deviceAddress")
             if (connectionTracker.isPeerConnected(peerID)) {
                  Log.d(TAG, "Deduplication: Peer $peerID is already connected (ignoring $deviceAddress)")

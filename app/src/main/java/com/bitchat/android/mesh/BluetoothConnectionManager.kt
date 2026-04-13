@@ -163,6 +163,9 @@ class BluetoothConnectionManager(
     /** Patch 88b: Skip phantom ACL poll when host is Android. */
     var hostIsAndroid: Boolean = false
 
+    /** Patch 90: Mark a peer as recently kicked so the scanner skips it. */
+    fun addKickedPeer(peerID: String) = clientManager.addKickedPeer(peerID)
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).
@@ -505,6 +508,20 @@ class BluetoothConnectionManager(
             if (conn.isClient) {
                 try { conn.gatt?.disconnect() } catch (_: Exception) { }
                 try { conn.gatt?.close() } catch (_: Exception) { }
+                // Patch 90: Poll until BLE controller confirms client ACL released.
+                // Same pattern as Patch 89 in disconnectPeer().
+                try {
+                    val device = bluetoothManager.adapter.getRemoteDevice(address)
+                    val deadline = System.currentTimeMillis() + 5000
+                    while (System.currentTimeMillis() < deadline) {
+                        val state = bluetoothManager.getConnectionState(device, android.bluetooth.BluetoothProfile.GATT)
+                        if (state != android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                            Log.i(TAG, "Patch 90: Client ACL released for $address")
+                            break
+                        }
+                        Thread.sleep(50)
+                    }
+                } catch (_: Exception) { }
             } else {
                 serverManager.disconnectDevice(conn.device)
             }
