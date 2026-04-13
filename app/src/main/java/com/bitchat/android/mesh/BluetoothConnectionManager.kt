@@ -160,6 +160,9 @@ class BluetoothConnectionManager(
     /** Patch 88b: Callback fired after phantom ACL poll completes and advertising begins. */
     var onAdvertisingReady: (() -> Unit)? = null
 
+    /** Patch 88b: Skip phantom ACL poll when host is Android. */
+    var hostIsAndroid: Boolean = false
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).
@@ -274,43 +277,65 @@ class BluetoothConnectionManager(
                 // host can't connect while the phantom exists. Poll until
                 // getConnectedDevices returns empty, then advertise on a clean
                 // radio. Devices without phantoms (Pixel 7) pass immediately.
-                val phantomDeadline = System.currentTimeMillis() + 20_000
-                var phantomPollCount = 0
-                while (System.currentTimeMillis() < phantomDeadline) {
+                //
+                // Patch 88b: Skip the blocking poll when the host is Android.
+                // With an Android host, the "phantom" is actually the host's
+                // real GATT client connection re-attaching via the surviving ACL.
+                // Blocking on it prevents the player from advertising and sending
+                // JoinRequests. maxServerConnections=2 ensures the real subscription
+                // can complete alongside the phantom.
+                if (hostIsAndroid) {
                     val staleDevices = try {
                         bluetoothManager.getConnectedDevices(
                             android.bluetooth.BluetoothProfile.GATT_SERVER
                         )
                     } catch (_: Exception) { emptyList() }
-
                     if (staleDevices.isEmpty()) {
-                        if (phantomPollCount == 0) {
-                            Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
-                        } else {
-                            Log.i(TAG, "Patch 88: Phantom ACL cleared after $phantomPollCount polls " +
-                                    "(${System.currentTimeMillis() - (phantomDeadline - 20_000)}ms)")
-                        }
-                        break
-                    }
-
-                    if (phantomPollCount == 0) {
-                        Log.i(TAG, "Patch 88: Waiting for phantom ACL to clear: " +
+                        Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
+                    } else {
+                        Log.i(TAG, "Patch 88b: Android host — skipping phantom poll, " +
+                                "${staleDevices.size} existing connection(s): " +
                                 staleDevices.joinToString { it.address })
                     }
-                    phantomPollCount++
-                    delay(250)
-                }
+                } else {
+                    val phantomDeadline = System.currentTimeMillis() + 20_000
+                    var phantomPollCount = 0
+                    while (System.currentTimeMillis() < phantomDeadline) {
+                        val staleDevices = try {
+                            bluetoothManager.getConnectedDevices(
+                                android.bluetooth.BluetoothProfile.GATT_SERVER
+                            )
+                        } catch (_: Exception) { emptyList() }
 
-                // Log if phantom survived the full deadline
-                if (phantomPollCount > 0) {
-                    val remaining = try {
-                        bluetoothManager.getConnectedDevices(
-                            android.bluetooth.BluetoothProfile.GATT_SERVER
-                        )
-                    } catch (_: Exception) { emptyList() }
-                    if (remaining.isNotEmpty()) {
-                        Log.w(TAG, "Patch 88: Phantom ACL survived 20s deadline: " +
-                                remaining.joinToString { it.address })
+                        if (staleDevices.isEmpty()) {
+                            if (phantomPollCount == 0) {
+                                Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
+                            } else {
+                                Log.i(TAG, "Patch 88: Phantom ACL cleared after $phantomPollCount polls " +
+                                        "(${System.currentTimeMillis() - (phantomDeadline - 20_000)}ms)")
+                            }
+                            break
+                        }
+
+                        if (phantomPollCount == 0) {
+                            Log.i(TAG, "Patch 88: Waiting for phantom ACL to clear: " +
+                                    staleDevices.joinToString { it.address })
+                        }
+                        phantomPollCount++
+                        delay(250)
+                    }
+
+                    // Log if phantom survived the full deadline
+                    if (phantomPollCount > 0) {
+                        val remaining = try {
+                            bluetoothManager.getConnectedDevices(
+                                android.bluetooth.BluetoothProfile.GATT_SERVER
+                            )
+                        } catch (_: Exception) { emptyList() }
+                        if (remaining.isNotEmpty()) {
+                            Log.w(TAG, "Patch 88: Phantom ACL survived 20s deadline: " +
+                                    remaining.joinToString { it.address })
+                        }
                     }
                 }
 

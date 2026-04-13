@@ -152,6 +152,11 @@ class BluetoothMeshService(
         get() = connectionManager.onAdvertisingReady
         set(value) { connectionManager.onAdvertisingReady = value }
 
+    /** Patch 88b: Skip phantom ACL poll when host is Android. */
+    var hostIsAndroid: Boolean
+        get() = connectionManager.hostIsAndroid
+        set(value) { connectionManager.hostIsAndroid = value }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Tracks whether this instance has been terminated via stopServices()
