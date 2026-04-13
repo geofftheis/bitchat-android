@@ -191,7 +191,9 @@ class BluetoothGattServerManager(
      * a clean BLE radio.
      */
     fun beginAdvertising() {
-        connectionScope.launch {
+        // Use restartJob to prevent orphaned callbacks — same pattern as restartAdvertising().
+        restartJob?.cancel()
+        restartJob = connectionScope.launch {
             startAdvertising()
         }
     }
@@ -548,6 +550,7 @@ class BluetoothGattServerManager(
         } catch (e: Exception) {
             Log.w(TAG, "Error stopping advertising: ${e.message}")
         }
+        advertiseCallback = null
     }
     
     /**
