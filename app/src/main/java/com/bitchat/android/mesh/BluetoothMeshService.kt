@@ -147,6 +147,11 @@ class BluetoothMeshService(
         get() = connectionManager.onAdvertisingFailed
         set(value) { connectionManager.onAdvertisingFailed = value }
 
+    /** Patch 88b: Callback fired after phantom ACL poll completes and advertising begins. */
+    var onAdvertisingReady: (() -> Unit)?
+        get() = connectionManager.onAdvertisingReady
+        set(value) { connectionManager.onAdvertisingReady = value }
+
     // Coroutines
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // Tracks whether this instance has been terminated via stopServices()

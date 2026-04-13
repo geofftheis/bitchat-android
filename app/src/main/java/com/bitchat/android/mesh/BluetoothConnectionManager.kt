@@ -157,6 +157,9 @@ class BluetoothConnectionManager(
         get() = serverManager.onAdvertisingFailed
         set(value) { serverManager.onAdvertisingFailed = value }
 
+    /** Patch 88b: Callback fired after phantom ACL poll completes and advertising begins. */
+    var onAdvertisingReady: (() -> Unit)? = null
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).
@@ -313,6 +316,7 @@ class BluetoothConnectionManager(
 
                 // Patch 88: Start advertising now that the radio is clean.
                 serverManager.beginAdvertising()
+                onAdvertisingReady?.invoke() // Patch 88b
 
                 delay(100) // Brief settle time
                 enforceStrictLimits()
