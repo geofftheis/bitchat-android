@@ -274,72 +274,22 @@ class BluetoothConnectionManager(
                     Log.e(TAG, "Patch 86: GATT service setup failed or timed out, continuing anyway")
                 }
 
-                // Patch 88: Wait for phantom ACL to clear before advertising.
-                // On Pixel 9 Pro (Tensor G4), a phantom ACL from the previous
-                // session re-appears when the new GATT server opens. The iOS
-                // host can't connect while the phantom exists. Poll until
-                // getConnectedDevices returns empty, then advertise on a clean
-                // radio. Devices without phantoms (Pixel 7) pass immediately.
-                //
-                // Patch 88b: Skip the blocking poll when the host is Android.
-                // With an Android host, the "phantom" is actually the host's
-                // real GATT client connection re-attaching via the surviving ACL.
-                // Blocking on it prevents the player from advertising and sending
-                // JoinRequests. maxServerConnections=2 ensures the real subscription
-                // can complete alongside the phantom.
-                if (hostIsAndroid) {
-                    val staleDevices = try {
-                        bluetoothManager.getConnectedDevices(
-                            android.bluetooth.BluetoothProfile.GATT_SERVER
-                        )
-                    } catch (_: Exception) { emptyList() }
-                    if (staleDevices.isEmpty()) {
-                        Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
-                    } else {
-                        Log.i(TAG, "Patch 88b: Android host — skipping phantom poll, " +
-                                "${staleDevices.size} existing connection(s): " +
-                                staleDevices.joinToString { it.address })
-                    }
+                // Patch 88: Single-pass stale connection check (best-effort).
+                // maxServerConnections=10 ensures the real host connection can
+                // subscribe alongside any phantom ACLs. iOS-side Patches 87/87b
+                // reject phantom didConnect callbacks independently. No blocking
+                // poll needed — just log and proceed.
+                val staleDevices = try {
+                    bluetoothManager.getConnectedDevices(
+                        android.bluetooth.BluetoothProfile.GATT_SERVER
+                    )
+                } catch (_: Exception) { emptyList() }
+                if (staleDevices.isEmpty()) {
+                    Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
                 } else {
-                    val phantomDeadline = System.currentTimeMillis() + 20_000
-                    var phantomPollCount = 0
-                    while (System.currentTimeMillis() < phantomDeadline) {
-                        val staleDevices = try {
-                            bluetoothManager.getConnectedDevices(
-                                android.bluetooth.BluetoothProfile.GATT_SERVER
-                            )
-                        } catch (_: Exception) { emptyList() }
-
-                        if (staleDevices.isEmpty()) {
-                            if (phantomPollCount == 0) {
-                                Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
-                            } else {
-                                Log.i(TAG, "Patch 88: Phantom ACL cleared after $phantomPollCount polls " +
-                                        "(${System.currentTimeMillis() - (phantomDeadline - 20_000)}ms)")
-                            }
-                            break
-                        }
-
-                        if (phantomPollCount == 0) {
-                            Log.i(TAG, "Patch 88: Waiting for phantom ACL to clear: " +
-                                    staleDevices.joinToString { it.address })
-                        }
-                        phantomPollCount++
-                        delay(250)
-                    }
-
-                    // Log if phantom survived the full deadline
-                    if (phantomPollCount > 0) {
-                        val remaining = try {
-                            bluetoothManager.getConnectedDevices(
-                                android.bluetooth.BluetoothProfile.GATT_SERVER
-                            )
-                        } catch (_: Exception) { emptyList() }
-                        if (remaining.isNotEmpty()) {
-                            Log.w(TAG, "Patch 88: Phantom ACL survived 20s deadline: " +
-                                    remaining.joinToString { it.address })
-                        }
-                    }
+                    Log.i(TAG, "Patch 88: ${staleDevices.size} stale connection(s) at startup: " +
+                            staleDevices.joinToString { it.address } +
+                            " (proceeding — high maxServerConnections)")
                 }
 
                 // Patch 88: Start advertising now that the radio is clean.
