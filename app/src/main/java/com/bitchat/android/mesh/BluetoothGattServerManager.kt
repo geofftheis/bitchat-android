@@ -155,13 +155,53 @@ class BluetoothGattServerManager(
         // skipped when connectionScope is cancelled immediately after stop().
         stopAdvertising()
 
-        // Try to cancel any active connections explicitly before closing
+        // Try to cancel any active connections explicitly before closing.
+        // Collect the BluetoothDevice handles so we can poll their disconnect
+        // state after cancelConnection returns (see Patch 92 below).
+        val devicesToCheck = mutableListOf<android.bluetooth.BluetoothDevice>()
         try {
             val servers = connectionTracker.getConnectedDevices().values.filter { !it.isClient }
             servers.forEach { d ->
+                devicesToCheck.add(d.device)
                 try { gattServer?.cancelConnection(d.device) } catch (_: Exception) { }
             }
         } catch (_: Exception) { }
+
+        // Patch 92: Poll until the BLE controller confirms each server-side
+        // device is actually disconnected before we call gattServer.close().
+        // cancelConnection() is asynchronous — the disconnect completes later
+        // via onConnectionStateChange. If we call close() before the controller
+        // finishes processing the disconnect, the ACL can enter an ambiguous
+        // state that takes 20+ seconds to resolve internally on some chipsets
+        // (notably the Pixel 9 Pro / Tensor G4). Matches Patch 58b in
+        // BluetoothGattClientManager.stop() on the client side.
+        if (devicesToCheck.isNotEmpty()) {
+            val deadline = System.currentTimeMillis() + 2000
+            while (System.currentTimeMillis() < deadline) {
+                val allDisconnected = devicesToCheck.all { device ->
+                    try {
+                        bluetoothManager.getConnectionState(device, BluetoothProfile.GATT_SERVER) != BluetoothProfile.STATE_CONNECTED
+                    } catch (_: Exception) { true }
+                }
+                if (allDisconnected) {
+                    Log.i(TAG, "Patch 92: All GATT server-side connections confirmed disconnected")
+                    break
+                }
+                Thread.sleep(50)
+            }
+            // Log if any survived the deadline so we can tell from logs whether
+            // the race is the root cause or whether the BLE stack simply doesn't
+            // report server-side disconnects promptly.
+            val stillConnected = devicesToCheck.filter { device ->
+                try {
+                    bluetoothManager.getConnectionState(device, BluetoothProfile.GATT_SERVER) == BluetoothProfile.STATE_CONNECTED
+                } catch (_: Exception) { false }
+            }
+            if (stillConnected.isNotEmpty()) {
+                Log.w(TAG, "Patch 92: ${stillConnected.size} server-side connection(s) still not disconnected after 2s deadline: " +
+                        stillConnected.joinToString { it.address })
+            }
+        }
 
         gattServer?.close()
         gattServer = null
