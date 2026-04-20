@@ -493,24 +493,12 @@ class BluetoothConnectionManager(
             if (conn.isClient) {
                 try { conn.gatt?.disconnect() } catch (_: Exception) { }
                 try { conn.gatt?.close() } catch (_: Exception) { }
-                // Patch 90: Poll until BLE controller confirms client ACL released.
-                // Same pattern as Patch 89 in disconnectPeer(). On Tensor G4 the stale
-                // ACL poisons the stack, causing subsequent connectGatt() calls to the
-                // returning player to fail with status 133. Callers MUST invoke this
-                // function off the main thread (e.g. withContext(Dispatchers.IO)) because
-                // the poll uses blocking Thread.sleep and can run up to 5 seconds.
-                try {
-                    val device = bluetoothManager.adapter.getRemoteDevice(address)
-                    val deadline = System.currentTimeMillis() + 5000
-                    while (System.currentTimeMillis() < deadline) {
-                        val state = bluetoothManager.getConnectionState(device, android.bluetooth.BluetoothProfile.GATT)
-                        if (state != android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
-                            Log.i(TAG, "Patch 90: Client ACL released for $address")
-                            break
-                        }
-                        Thread.sleep(50)
-                    }
-                } catch (_: Exception) { }
+                // Patch 90 poll removed: getConnectionState(GATT) reports GATT profile
+                // state, not ACL link state. After gatt.close() the profile is
+                // unregistered so the poll exits immediately, while the underlying ACL
+                // persists for 20+ seconds on Tensor G4 anyway. The poll was a no-op.
+                // ACL release is handled at the next transport startup by Patch 93's
+                // phantom poll in startServices().
             } else {
                 serverManager.disconnectDevice(conn.device)
             }
@@ -577,22 +565,12 @@ class BluetoothConnectionManager(
                 // Client-side (outbound): disconnect + close GATT client
                 try { conn.gatt?.disconnect() } catch (_: Exception) { }
                 try { conn.gatt?.close() } catch (_: Exception) { }
-                // Patch 89: Poll until the BLE controller confirms the client ACL
-                // is released. Without this, the stale ACL persists on Tensor G4
-                // and all subsequent connectGatt() calls to the returning player
-                // fail with status 133. Same pattern as Patch 58b in clientManager.stop().
-                try {
-                    val device = bluetoothManager.adapter.getRemoteDevice(address)
-                    val deadline = System.currentTimeMillis() + 5000
-                    while (System.currentTimeMillis() < deadline) {
-                        val state = bluetoothManager.getConnectionState(device, android.bluetooth.BluetoothProfile.GATT)
-                        if (state != android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
-                            Log.i(TAG, "Patch 89: Client ACL released for $address")
-                            break
-                        }
-                        Thread.sleep(50)
-                    }
-                } catch (_: Exception) { }
+                // Patch 89 poll removed: getConnectionState(GATT) reports GATT profile
+                // state, not ACL link state. After gatt.close() the profile is
+                // unregistered so the poll exits immediately, while the underlying ACL
+                // persists for 20+ seconds on Tensor G4 anyway. The poll was a no-op.
+                // ACL release is handled at the next transport startup by Patch 93's
+                // phantom poll in startServices().
             } else {
                 // Server-side (inbound): cancel connection via GATT server
                 serverManager.disconnectDevice(conn.device)
