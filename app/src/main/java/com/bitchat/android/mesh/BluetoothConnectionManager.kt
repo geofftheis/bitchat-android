@@ -166,6 +166,9 @@ class BluetoothConnectionManager(
     /** Patch 90: Mark a peer as recently kicked so the scanner skips it. */
     fun addKickedPeer(peerID: String) = clientManager.addKickedPeer(peerID)
 
+    /** Patch 94: Pin power mode out of POWER_SAVER when hosting. */
+    fun setHostRoleActive(active: Boolean) = powerManager.setHostRoleActive(active)
+
     init {
         powerManager.delegate = this
         // Debug settings observers removed (ui/ deleted in Patch 16).

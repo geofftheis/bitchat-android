@@ -106,6 +106,11 @@ class BluetoothMeshService(
         connectionManager.disconnectByAddress(address)
     }
 
+    /** Patch 94: Pin power mode out of POWER_SAVER while hosting a game. */
+    fun setHostRoleActive(active: Boolean) {
+        connectionManager.setHostRoleActive(active)
+    }
+
     /** Patch 40: Enable host mode — disables scanning and outbound client connections.
      *  Must be set BEFORE calling startServices(). */
     var hostMode: Boolean

@@ -56,6 +56,10 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
     private var isCharging = false
     private var batteryLevel = 100
     private var isAppInBackground = true
+    // Half-Wit Patch 94: When acting as host, don't self-throttle advertising/scanning
+    // while backgrounded — a host must stay discoverable and must keep the -85dBm
+    // RSSI scan filter so rejoining players across the room aren't rejected.
+    private var isHostRoleActive = false
     
     private val powerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var dutyCycleJob: Job? = null
@@ -141,7 +145,19 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
             else -> {}
         }
     }
-    
+
+    /**
+     * Patch 94: Mark this device as hosting a Half-Wit game. While active, the
+     * background power cap is skipped so advertising stays at BALANCED (or
+     * PERFORMANCE when charging) and the scan RSSI filter stays at -85 dBm.
+     */
+    fun setHostRoleActive(active: Boolean) {
+        if (isHostRoleActive == active) return
+        isHostRoleActive = active
+        Log.i(TAG, "Patch 94: Host role active=$active")
+        updatePowerMode()
+    }
+
     /**
      * Get aggressive scan settings for fast device discovery (joiners connecting to a game).
      * Patch 34: Always use LOW_LATENCY scan mode regardless of power mode.
@@ -276,7 +292,9 @@ class PowerManager(private val context: Context) : LifecycleEventObserver {
 
         // If app is in background (including when running as a foreground service),
         // cap the power mode to at least POWER_SAVER. Preserve ULTRA_LOW_POWER.
-        val newMode = if (isAppInBackground) {
+        // Patch 94: Skip this cap when running as a host — hosts must stay loud.
+        // Critical battery (ULTRA_LOW_POWER) still wins to protect the device.
+        val newMode = if (isAppInBackground && !isHostRoleActive) {
             if (baseMode == PowerMode.ULTRA_LOW_POWER) PowerMode.ULTRA_LOW_POWER else PowerMode.POWER_SAVER
         } else {
             baseMode
