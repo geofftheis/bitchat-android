@@ -514,12 +514,15 @@ class BluetoothConnectionManager(
             if (conn.isClient) {
                 val gatt = conn.gatt
                 if (gatt != null) {
+                    // Patch 96: Unsubscribe the CCCD FIRST so the peer's GATT server
+                    // tears down its subscription state before the ACL goes away.
+                    // Without this, the peer's BLE controller keeps the link slot
+                    // pinned as an active subscriber even after disconnect, causing
+                    // the server-side phantom ACL that blocks rejoin (Tensor G2/G4).
+                    clientManager.unsubscribeAndAwait(gatt, timeoutMs = 300)
                     // Patch 95: Issue disconnect and wait for the STATE_DISCONNECTED
                     // callback before closing. Calling close() before the callback fires
-                    // drops the in-flight LL_TERMINATE_IND, leaving a phantom ACL on the
-                    // peer that causes status 133 on subsequent connectGatt() attempts
-                    // (Tensor G2/G4). See Patch 89/90 removal notes: the old poll exited
-                    // in ~14ms because it checked GATT profile state, not ACL state.
+                    // drops the in-flight LL_TERMINATE_IND.
                     clientManager.disconnectAndAwait(gatt, timeoutMs = 500)
                     try { gatt.close() } catch (_: Exception) { }
                 }
@@ -588,9 +591,10 @@ class BluetoothConnectionManager(
         val conn = connectionTracker.getConnectedDevices()[address]
         if (conn != null) {
             if (conn.isClient) {
-                // Client-side (outbound): disconnect, wait for callback, then close.
+                // Client-side (outbound): unsubscribe CCCD, disconnect, await, close.
                 val gatt = conn.gatt
                 if (gatt != null) {
+                    clientManager.unsubscribeAndAwait(gatt, timeoutMs = 300) // Patch 96
                     clientManager.disconnectAndAwait(gatt, timeoutMs = 500)
                     try { gatt.close() } catch (_: Exception) { }
                 }

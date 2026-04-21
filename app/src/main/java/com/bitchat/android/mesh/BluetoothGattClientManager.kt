@@ -91,6 +91,14 @@ class BluetoothGattClientManager(
     // subsequent connectGatt() calls on Tensor-class controllers with status 133.
     private val disconnectWaiters = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
+    // Patch 96: Per-address one-shot waiters completed when the GATT client callback
+    // emits onDescriptorWrite for the CCCD. Used by unsubscribeAndAwait() to write
+    // DISABLE_NOTIFICATION_VALUE before disconnecting, so the peripheral's GATT
+    // server knows to tear down its server-side subscription state. Without this,
+    // the peer's controller keeps the ACL slot pinned after the host disconnects,
+    // causing server-side phantom connections on rejoin.
+    private val descriptorWriteWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
     // Patch 39: Mesh-maintenance mode uses BALANCED/AGGRESSIVE scan settings instead of aggressive LOW_LATENCY.
     // Host devices start in this mode from transport init; joiners switch to it after joining.
     var meshMaintenanceMode = false
@@ -113,6 +121,41 @@ class BluetoothGattClientManager(
 
     fun addKickedPeer(peerID: String) {
         recentlyKickedPeers[peerID] = System.currentTimeMillis()
+    }
+
+    /**
+     * Patch 96: Unsubscribe from the characteristic's CCCD and suspend until the
+     * onDescriptorWrite callback confirms. Should be called BEFORE gatt.disconnect()
+     * so the peripheral's GATT server tears down its subscription state cleanly.
+     * Returns true if the write was acknowledged, false on timeout/failure.
+     *
+     * Without this, the peer's server side keeps the host listed as a subscriber
+     * even after the ACL goes away, which on Tensor controllers pins the link
+     * slot and blocks subsequent inbound connections from a new host.
+     */
+    suspend fun unsubscribeAndAwait(gatt: BluetoothGatt, timeoutMs: Long = 300): Boolean {
+        val address = gatt.device.address
+        val conn = connectionTracker.getDeviceConnection(address) ?: return false
+        val characteristic = conn.characteristic ?: return false
+        val descriptor = characteristic.getDescriptor(com.bitchat.android.util.AppConstants.Mesh.Gatt.DESCRIPTOR_UUID)
+            ?: return false
+
+        val deferred = CompletableDeferred<Boolean>()
+        descriptorWriteWaiters.put(address, deferred)?.complete(false)
+        return try {
+            // Turn off local notification routing first so stray incoming PDUs aren't
+            // delivered after we tear down. Then ask the peer to stop sending via CCCD.
+            try { gatt.setCharacteristicNotification(characteristic, false) } catch (_: Exception) { }
+            descriptor.value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+            val queued = try { gatt.writeDescriptor(descriptor) } catch (_: Exception) { false }
+            if (!queued) {
+                Log.w(TAG, "Patch 96: writeDescriptor(DISABLE) returned false for $address")
+                return false
+            }
+            withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
+        } finally {
+            descriptorWriteWaiters.remove(address, deferred)
+        }
     }
 
     /**
@@ -693,6 +736,17 @@ class BluetoothGattClientManager(
             override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
                 val addr = gatt.device.address
                 if (descriptor.uuid == AppConstants.Mesh.Gatt.DESCRIPTOR_UUID) {
+                    // Patch 96: If an unsubscribeAndAwait() caller is waiting for
+                    // this descriptor write, signal it regardless of whether this
+                    // was an ENABLE or DISABLE write. The caller only issues the
+                    // DISABLE path, so a signalled waiter here always means the
+                    // disable was acknowledged.
+                    val waiter = descriptorWriteWaiters.remove(addr)
+                    if (waiter != null) {
+                        waiter.complete(status == BluetoothGatt.GATT_SUCCESS)
+                        return
+                    }
+
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         Log.i(TAG, "Client: Indication subscription confirmed for $addr")
                         connectionTracker.getDeviceConnection(addr)?.let { conn ->
