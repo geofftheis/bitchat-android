@@ -505,28 +505,33 @@ class BluetoothConnectionManager(
     }
 
     /** Disconnect a device by MAC address directly, bypassing addressPeerMap lookup.
-     *  Used when the MAC was captured before a LEAVE packet could clear the mapping. */
-    fun disconnectByAddress(address: String) {
+     *  Used when the MAC was captured before a LEAVE packet could clear the mapping.
+     *  Patch 95: Suspending — waits for the GATT client/server disconnect callback
+     *  before calling gatt.close() so LL_TERMINATE_IND reaches the peer. */
+    suspend fun disconnectByAddress(address: String) {
         val conn = connectionTracker.getConnectedDevices()[address]
         if (conn != null) {
             if (conn.isClient) {
-                try { conn.gatt?.disconnect() } catch (_: Exception) { }
-                try { conn.gatt?.close() } catch (_: Exception) { }
-                // Patch 90 poll removed: getConnectionState(GATT) reports GATT profile
-                // state, not ACL link state. After gatt.close() the profile is
-                // unregistered so the poll exits immediately, while the underlying ACL
-                // persists for 20+ seconds on Tensor G4 anyway. The poll was a no-op.
-                // ACL release is handled at the next transport startup by Patch 93's
-                // phantom poll in startServices().
+                val gatt = conn.gatt
+                if (gatt != null) {
+                    // Patch 95: Issue disconnect and wait for the STATE_DISCONNECTED
+                    // callback before closing. Calling close() before the callback fires
+                    // drops the in-flight LL_TERMINATE_IND, leaving a phantom ACL on the
+                    // peer that causes status 133 on subsequent connectGatt() attempts
+                    // (Tensor G2/G4). See Patch 89/90 removal notes: the old poll exited
+                    // in ~14ms because it checked GATT profile state, not ACL state.
+                    clientManager.disconnectAndAwait(gatt, timeoutMs = 500)
+                    try { gatt.close() } catch (_: Exception) { }
+                }
             } else {
-                serverManager.disconnectDevice(conn.device)
+                serverManager.disconnectDeviceAndAwait(conn.device, timeoutMs = 500)
             }
             Log.i(TAG, "Patch 65b: Disconnected device at $address (client=${conn.isClient})")
         } else {
             // Connection already cleaned up by LEAVE handler, but try server cancel anyway
             try {
                 val device = bluetoothManager.adapter.getRemoteDevice(address)
-                serverManager.disconnectDevice(device)
+                serverManager.disconnectDeviceAndAwait(device, timeoutMs = 500)
                 Log.i(TAG, "Patch 65b: Force-cancelled server connection at $address (no tracker entry)")
             } catch (e: Exception) {
                 Log.w(TAG, "Patch 65b: Failed to cancel connection at $address: ${e.message}")
@@ -539,7 +544,7 @@ class BluetoothConnectionManager(
         if (conn?.isClient == true) {
             try {
                 val device = bluetoothManager.adapter.getRemoteDevice(address)
-                serverManager.disconnectDevice(device)
+                serverManager.disconnectDeviceAndAwait(device, timeoutMs = 500)
             } catch (_: Exception) { }
         }
         // Always clean up tracker + subscribedDevices regardless of which branch ran.
@@ -573,7 +578,9 @@ class BluetoothConnectionManager(
         } catch (_: Exception) { }
     }
 
-    fun disconnectPeer(peerId: String) {
+    /** Patch 95: Suspending — waits for the GATT client/server disconnect callback
+     *  before calling gatt.close() so LL_TERMINATE_IND reaches the peer. */
+    suspend fun disconnectPeer(peerId: String) {
         val address = addressPeerMap.entries.find { it.value == peerId }?.key ?: run {
             Log.i(TAG, "Patch 59/61: No addressPeerMap entry for departed peer ${peerId.take(8)}")
             return
@@ -581,24 +588,21 @@ class BluetoothConnectionManager(
         val conn = connectionTracker.getConnectedDevices()[address]
         if (conn != null) {
             if (conn.isClient) {
-                // Client-side (outbound): disconnect + close GATT client
-                try { conn.gatt?.disconnect() } catch (_: Exception) { }
-                try { conn.gatt?.close() } catch (_: Exception) { }
-                // Patch 89 poll removed: getConnectionState(GATT) reports GATT profile
-                // state, not ACL link state. After gatt.close() the profile is
-                // unregistered so the poll exits immediately, while the underlying ACL
-                // persists for 20+ seconds on Tensor G4 anyway. The poll was a no-op.
-                // ACL release is handled at the next transport startup by Patch 93's
-                // phantom poll in startServices().
+                // Client-side (outbound): disconnect, wait for callback, then close.
+                val gatt = conn.gatt
+                if (gatt != null) {
+                    clientManager.disconnectAndAwait(gatt, timeoutMs = 500)
+                    try { gatt.close() } catch (_: Exception) { }
+                }
             } else {
-                // Server-side (inbound): cancel connection via GATT server
-                serverManager.disconnectDevice(conn.device)
+                // Server-side (inbound): cancel connection via GATT server and wait.
+                serverManager.disconnectDeviceAndAwait(conn.device, timeoutMs = 500)
             }
             // Patch 76: Also cancel the server side if this was a client connection
             if (conn.isClient) {
                 try {
                     val device = bluetoothManager.adapter.getRemoteDevice(address)
-                    serverManager.disconnectDevice(device)
+                    serverManager.disconnectDeviceAndAwait(device, timeoutMs = 500)
                 } catch (_: Exception) { }
             }
             connectionTracker.cleanupDeviceConnection(address)

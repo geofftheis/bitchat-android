@@ -91,8 +91,9 @@ class BluetoothMeshService(
         connectionManager.enforceConnectionLimits()
     }
 
-    /** Patch 59: Disconnect a specific peer by peer ID (e.g., when host removes them from the lobby). */
-    fun disconnectPeer(peerId: String) {
+    /** Patch 59: Disconnect a specific peer by peer ID (e.g., when host removes them from the lobby).
+     *  Patch 95: Suspending — awaits the GATT disconnect callback before close(). */
+    suspend fun disconnectPeer(peerId: String) {
         connectionManager.disconnectPeer(peerId)
     }
 
@@ -101,8 +102,9 @@ class BluetoothMeshService(
         return connectionManager.getMacForPeer(peerId)
     }
 
-    /** Disconnect by saved MAC address, bypassing addressPeerMap lookup. */
-    fun disconnectByAddress(address: String) {
+    /** Disconnect by saved MAC address, bypassing addressPeerMap lookup.
+     *  Patch 95: Suspending — awaits the GATT disconnect callback before close(). */
+    suspend fun disconnectByAddress(address: String) {
         connectionManager.disconnectByAddress(address)
     }
 

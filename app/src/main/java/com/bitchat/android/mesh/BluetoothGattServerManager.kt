@@ -53,6 +53,13 @@ class BluetoothGattServerManager(
     // GATT server for peripheral mode
     private var gattServer: BluetoothGattServer? = null
     private var characteristic: BluetoothGattCharacteristic? = null
+
+    // Patch 95: Per-address one-shot waiters completed when the GATT server
+    // callback emits STATE_DISCONNECTED. Mirrors the client-side mechanism so
+    // callers that cancel a server-side connection can wait for the BLE stack
+    // to finish the teardown before proceeding (e.g. before advertising again,
+    // or before closing the whole GATT server during shutdown).
+    private val disconnectWaiters = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Unit>>()
     private var advertiseCallback: AdvertiseCallback? = null
     
     // State management
@@ -86,6 +93,30 @@ class BluetoothGattServerManager(
             gattServer?.cancelConnection(device)
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting device ${device.address}: ${e.message}")
+        }
+    }
+
+    /**
+     * Patch 95: Cancel the server-side connection to [device] and suspend until
+     * the GATT server callback emits STATE_DISCONNECTED for this device, or
+     * [timeoutMs] elapses. Returns true if the callback fired, false on timeout.
+     * Gives the BLE controller time to emit LL_TERMINATE_IND before the caller
+     * proceeds with further radio operations (advertising restart, close, etc.).
+     */
+    suspend fun disconnectDeviceAndAwait(device: BluetoothDevice, timeoutMs: Long = 500): Boolean {
+        val address = device.address
+        val deferred = CompletableDeferred<Unit>()
+        disconnectWaiters.put(address, deferred)?.complete(Unit)
+        return try {
+            try {
+                gattServer?.cancelConnection(device)
+            } catch (e: Exception) {
+                Log.w(TAG, "Patch 95: server cancelConnection threw for $address: ${e.message}")
+                deferred.complete(Unit)
+            }
+            withTimeoutOrNull(timeoutMs) { deferred.await() } != null
+        } finally {
+            disconnectWaiters.remove(address, deferred)
         }
     }
     
@@ -257,6 +288,8 @@ class BluetoothGattServerManager(
                         connectionTracker.cleanupDeviceConnection(device.address)
                         // Notify delegate about device disconnection so higher layers can update direct flags
                         delegate?.onDeviceDisconnected(device)
+                        // Patch 95: Signal any disconnectDeviceAndAwait() waiter.
+                        disconnectWaiters.remove(device.address)?.complete(Unit)
                     }
                 }
             }

@@ -10,12 +10,14 @@ import android.os.ParcelUuid
 import android.util.Log
 import com.bitchat.android.protocol.BitchatPacket
 import com.bitchat.android.util.AppConstants
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.Job
 // DebugSettingsManager and DebugScanResult removed (ui/ deleted in Patch 16).
 // All references below replaced with inline defaults.
 
@@ -81,6 +83,14 @@ class BluetoothGattClientManager(
     // stack persists forever, leaking conn_ids.
     private val pendingGattClients = ConcurrentHashMap<String, BluetoothGatt>()
 
+    // Patch 95: Per-address one-shot waiters completed when the GATT client callback
+    // emits STATE_DISCONNECTED. Callers that initiate a disconnect use this to hold
+    // gatt.close() until the BLE stack has actually emitted the disconnect callback,
+    // giving the controller time to transmit LL_TERMINATE_IND. Calling close() too
+    // early causes the peer's BLE controller to hold a phantom ACL, which poisons
+    // subsequent connectGatt() calls on Tensor-class controllers with status 133.
+    private val disconnectWaiters = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+
     // Patch 39: Mesh-maintenance mode uses BALANCED/AGGRESSIVE scan settings instead of aggressive LOW_LATENCY.
     // Host devices start in this mode from transport init; joiners switch to it after joining.
     var meshMaintenanceMode = false
@@ -103,6 +113,37 @@ class BluetoothGattClientManager(
 
     fun addKickedPeer(peerID: String) {
         recentlyKickedPeers[peerID] = System.currentTimeMillis()
+    }
+
+    /**
+     * Patch 95: Issue gatt.disconnect() and suspend until the GATT client callback
+     * emits STATE_DISCONNECTED for this device, or [timeoutMs] elapses. Returns
+     * true if the callback fired, false on timeout.
+     *
+     * After this returns, callers are safe to invoke gatt.close(): the controller
+     * has had a chance to transmit LL_TERMINATE_IND over the air. Calling close()
+     * before the callback drops the termination PDU and leaves a phantom ACL on
+     * the peer, which on Tensor G2/G4 causes subsequent connectGatt() to that
+     * peer to fail with status 133 for 15-25 seconds.
+     */
+    suspend fun disconnectAndAwait(gatt: BluetoothGatt, timeoutMs: Long = 500): Boolean {
+        val address = gatt.device.address
+        val deferred = CompletableDeferred<Unit>()
+        // Replace any previous waiter (shouldn't happen in practice — one caller per peer).
+        disconnectWaiters.put(address, deferred)?.complete(Unit)
+        return try {
+            try {
+                gatt.disconnect()
+            } catch (e: Exception) {
+                Log.w(TAG, "Patch 95: gatt.disconnect() threw for $address: ${e.message}")
+                deferred.complete(Unit) // no callback coming
+            }
+            withTimeoutOrNull(timeoutMs) { deferred.await() } != null
+        } finally {
+            // Remove only if this is still the registered waiter (don't wipe a
+            // replacement from a concurrent caller).
+            disconnectWaiters.remove(address, deferred)
+        }
     }
 
     // Patch 42: Callback invoked when a GATT write to a remote server completes.
@@ -530,14 +571,25 @@ class BluetoothGattClientManager(
                     // Notify higher layers about device disconnection to update direct flags
                     delegate?.onDeviceDisconnected(gatt.device)
 
-                    // Close GATT with NonCancellable so scope cancellation can't prevent it.
-                    // Without close(), Android leaks GATT client slots.
-                    connectionScope.launch(kotlinx.coroutines.NonCancellable) {
-                        delay(500) // Brief delay after disconnect before close
-                        try {
-                            gatt.close()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error closing GATT: ${e.message}")
+                    // Patch 95: If an explicit disconnectAndAwait() caller is waiting for
+                    // this callback, signal it so the caller can invoke gatt.close() once
+                    // LL_TERMINATE_IND has been emitted. If no waiter is registered this
+                    // was a spontaneous disconnect (peer-initiated, radio error, etc.) —
+                    // fall back to the legacy delayed-close path so the GATT client slot
+                    // doesn't leak.
+                    val waiter = disconnectWaiters.remove(deviceAddress)
+                    if (waiter != null) {
+                        waiter.complete(Unit)
+                    } else {
+                        // Close GATT with NonCancellable so scope cancellation can't prevent it.
+                        // Without close(), Android leaks GATT client slots.
+                        connectionScope.launch(kotlinx.coroutines.NonCancellable) {
+                            delay(500) // Brief delay after disconnect before close
+                            try {
+                                gatt.close()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing GATT: ${e.message}")
+                            }
                         }
                     }
                 }
