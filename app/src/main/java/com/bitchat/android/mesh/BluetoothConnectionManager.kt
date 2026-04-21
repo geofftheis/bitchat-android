@@ -504,6 +504,11 @@ class BluetoothConnectionManager(
         return addressPeerMap.entries.find { it.value == peerId }?.key
     }
 
+    /** Patch 98: Wait for the server-side STATE_DISCONNECTED callback for [address]. */
+    suspend fun awaitPeerDisconnect(address: String, timeoutMs: Long): Boolean {
+        return serverManager.awaitPeerDisconnect(address, timeoutMs)
+    }
+
     /** Disconnect a device by MAC address directly, bypassing addressPeerMap lookup.
      *  Used when the MAC was captured before a LEAVE packet could clear the mapping.
      *  Patch 95: Suspending — waits for the GATT client/server disconnect callback

@@ -119,6 +119,32 @@ class BluetoothGattServerManager(
             disconnectWaiters.remove(address, deferred)
         }
     }
+
+    /**
+     * Patch 98: Suspend until the GATT server callback emits STATE_DISCONNECTED
+     * for [address] — i.e. until a peer-initiated (or locally-initiated) disconnect
+     * has actually landed at the server. Returns true if the callback fired or the
+     * peer was already disconnected at call time; false on timeout.
+     *
+     * Intended for the receiving side of a remote teardown: the non-host player
+     * observes its server-side disconnect from the departing host before calling
+     * cleanup() on its own mesh. Replaces the previous hardcoded delay heuristics.
+     */
+    suspend fun awaitPeerDisconnect(address: String, timeoutMs: Long): Boolean {
+        val stillConnected = try {
+            bluetoothManager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
+                .any { it.address == address }
+        } catch (_: Exception) { false }
+        if (!stillConnected) return true
+
+        val deferred = CompletableDeferred<Unit>()
+        disconnectWaiters.put(address, deferred)?.complete(Unit)
+        return try {
+            withTimeoutOrNull(timeoutMs) { deferred.await() } != null
+        } finally {
+            disconnectWaiters.remove(address, deferred)
+        }
+    }
     
     /**
      * Start GATT server

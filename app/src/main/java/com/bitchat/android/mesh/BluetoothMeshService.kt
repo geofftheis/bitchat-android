@@ -108,6 +108,14 @@ class BluetoothMeshService(
         connectionManager.disconnectByAddress(address)
     }
 
+    /** Patch 98: Suspend until the server-side STATE_DISCONNECTED callback fires
+     *  for [address], or [timeoutMs] elapses. Used by the receiving side of a
+     *  remote teardown to wait for the peer's graceful disconnect to actually
+     *  land before tearing down the local mesh. */
+    suspend fun awaitPeerDisconnect(address: String, timeoutMs: Long): Boolean {
+        return connectionManager.awaitPeerDisconnect(address, timeoutMs)
+    }
+
     /** Patch 94: Pin power mode out of POWER_SAVER while hosting a game. */
     fun setHostRoleActive(active: Boolean) {
         connectionManager.setHostRoleActive(active)
