@@ -119,6 +119,13 @@ class BluetoothMeshService(
     /** Patch 99: Return every MAC currently tracked as a live BLE connection. */
     fun getAllConnectedMacs(): Set<String> = connectionManager.getAllConnectedMacs()
 
+    /** Patch 102: Poll until the BLE controller reports no GATT_SERVER connections,
+     *  or [timeoutMs] elapses. Used between the per-peer disconnect loop and
+     *  cleanup() so the local mesh isn't torn down while LL_TERMINATE_IND is
+     *  still in flight. */
+    suspend fun awaitBleStackQuiet(timeoutMs: Long = 2000): Boolean =
+        connectionManager.awaitBleStackQuiet(timeoutMs)
+
     /** Patch 94: Pin power mode out of POWER_SAVER while hosting a game. */
     fun setHostRoleActive(active: Boolean) {
         connectionManager.setHostRoleActive(active)

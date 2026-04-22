@@ -515,6 +515,49 @@ class BluetoothConnectionManager(
      *  cache which can miss peers whose announce packet expired. */
     fun getAllConnectedMacs(): Set<String> = connectionTracker.getConnectedDevices().keys.toSet()
 
+    /**
+     * Patch 102: Poll the BLE controller's view of GATT_SERVER connections until
+     * empty (or [timeoutMs] elapses). Returns true if the controller reports
+     * no remaining connections. Intended to be called between the per-peer
+     * disconnect loop and cleanup() so we don't tear our own mesh down while
+     * the BLE stack is still finishing the LL_TERMINATE_IND round trip.
+     *
+     * Per Patch 95/96, each peer disconnect already awaits the local GATT
+     * client's STATE_DISCONNECTED callback. But that confirms our local
+     * controller's transaction, not the underlying ACL release — and on
+     * shared client+server ACL links, the server-profile view can still
+     * report the device for a beat or two after the client callback fires.
+     * Calling cleanup() before that drains races the in-flight teardown.
+     */
+    suspend fun awaitBleStackQuiet(timeoutMs: Long = 2000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var pollCount = 0
+        while (System.currentTimeMillis() < deadline) {
+            val stackDevices = try {
+                bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+            } catch (_: Exception) { emptyList() }
+            if (stackDevices.isEmpty()) {
+                if (pollCount > 0) {
+                    val elapsed = timeoutMs - (deadline - System.currentTimeMillis())
+                    Log.i(TAG, "Patch 102: BLE stack quiet after $pollCount polls (${elapsed}ms)")
+                }
+                return true
+            }
+            if (pollCount == 0) {
+                Log.i(TAG, "Patch 102: Waiting for BLE stack to drain: " +
+                        stackDevices.joinToString { it.address })
+            }
+            pollCount++
+            delay(100)
+        }
+        val remaining = try {
+            bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT_SERVER)
+        } catch (_: Exception) { emptyList() }
+        Log.w(TAG, "Patch 102: BLE stack still has ${remaining.size} connection(s) at " +
+                "${timeoutMs}ms deadline (${remaining.joinToString { it.address }}) — proceeding")
+        return false
+    }
+
     /** Disconnect a device by MAC address directly, bypassing addressPeerMap lookup.
      *  Used when the MAC was captured before a LEAVE packet could clear the mapping.
      *  Patch 95: Suspending — waits for the GATT client/server disconnect callback
