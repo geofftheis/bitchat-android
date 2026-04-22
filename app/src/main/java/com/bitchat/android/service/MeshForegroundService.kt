@@ -35,7 +35,18 @@ class MeshForegroundService : Service() {
         const val ACTION_UPDATE_NOTIFICATION = "com.bitchat.android.service.UPDATE_NOTIFICATION"
         const val ACTION_NOTIFICATION_PERMISSION_GRANTED = "com.bitchat.android.action.NOTIFICATION_PERMISSION_GRANTED"
 
+        // Patch 103: Process-wide gate that the periodic update loop and
+        // ensureMeshStarted() consult before re-spawning a mesh. Set to true
+        // synchronously in stop() so the windowed race between our caller's
+        // intent dispatch and the FGS coroutine's next tick can't recreate a
+        // fresh BluetoothMeshService underneath us.
+        @Volatile
+        private var meshAutoSpawnSuppressed: Boolean = false
+
         fun start(context: Context) {
+            // Patch 103: A new explicit start() call cancels any prior shutdown gate
+            // so the auto-spawn path can run again for this fresh session.
+            meshAutoSpawnSuppressed = false
             val intent = Intent(context, MeshForegroundService::class.java).apply { action = ACTION_START }
 
             // On API >= 26, avoid background-service start restrictions by using startForegroundService
@@ -82,6 +93,14 @@ class MeshForegroundService : Service() {
         }
 
         fun stop(context: Context) {
+            // Patch 103: Set the auto-spawn gate SYNCHRONOUSLY before the intent
+            // is dispatched. The intent itself is processed asynchronously on the
+            // service's main thread, but the FGS's periodic update loop runs on a
+            // separate coroutine and can tick (and call ensureMeshStarted) any
+            // time before ACTION_STOP gets a chance to cancel it. Setting this
+            // flag here means that even if the loop wins the race, ensureMeshStarted
+            // returns early and no fresh mesh is spawned with a default UUID.
+            meshAutoSpawnSuppressed = true
             val intent = Intent(context, MeshForegroundService::class.java).apply { action = ACTION_STOP }
             context.startService(intent)
         }
@@ -230,6 +249,15 @@ class MeshForegroundService : Service() {
 
     private fun ensureMeshStarted() {
         if (isShuttingDown) return
+        // Patch 103: Honor the synchronous shutdown gate from MeshForegroundService.stop().
+        // Without this check, the periodic update loop would race the ACTION_STOP intent
+        // and create a fresh BluetoothMeshService with the default UUID immediately after
+        // BitchatAdapter.cleanup() ran — leaving an orphaned mesh visible to the user
+        // (foreground notification with "0 peers" and a stuck phantom ACL on the controller).
+        if (meshAutoSpawnSuppressed) {
+            android.util.Log.d("MeshForegroundService", "Patch 103: ensureMeshStarted suppressed (cleanup in progress)")
+            return
+        }
         if (!hasBluetoothPermissions()) return
         try {
             android.util.Log.d("MeshForegroundService", "Ensuring mesh service is started")
