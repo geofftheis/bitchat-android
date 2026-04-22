@@ -485,15 +485,27 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
         val packet = routed.packet
         val peerID = routed.peerID ?: "unknown"
         val content = String(packet.payload, Charsets.UTF_8)
-        
+
         if (content.startsWith("#")) {
             // Channel leave
             delegate?.onChannelLeave(content, peerID)
-        } else {
-            // Peer disconnect
-            delegate?.removePeer(peerID)
+            return
         }
-        
+
+        // Patch 100b: A peer with a live BLE ACL on our side cannot be
+        // legitimately "leaving" — their physical connection is still up.
+        // The LEAVE is either stale, fragmented from a prior session, or
+        // otherwise spurious. Ignore it; the disconnect callback path will
+        // tear down peer state when the ACL actually drops. If a peer
+        // really has gone away, they will be missing from getAllConnectedMacs
+        // and we honor the LEAVE through the normal removePeer path.
+        if (delegate?.hasLiveBleConnection(peerID) == true) {
+            Log.w(TAG, "Patch 100b: Ignoring LEAVE from ${peerID.take(8)} — BLE link still alive (size=${packet.payload.size}, signed=${packet.signature != null})")
+            return
+        }
+
+        // Peer disconnect
+        delegate?.removePeer(peerID)
         // Leave message relay is now handled by centralized PacketRelayManager
     }
     
@@ -603,6 +615,12 @@ interface MessageHandlerDelegate {
     fun relayPacket(routed: RoutedPacket)
     fun getBroadcastRecipient(): ByteArray
     
+    // Patch 100b: True if [peerID] is still associated with a live BLE ACL on
+    // our side (via the connection tracker's address↔peerID map). Used to
+    // ignore spurious LEAVE packets that claim a peer is gone while their
+    // ACL is in fact still up.
+    fun hasLiveBleConnection(peerID: String): Boolean
+
     // Cryptographic operations
     fun verifySignature(packet: BitchatPacket, peerID: String): Boolean
     fun encryptForPeer(data: ByteArray, recipientPeerID: String): ByteArray?

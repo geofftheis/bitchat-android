@@ -399,6 +399,15 @@ class BluetoothMeshService(
                 return SpecialRecipients.BROADCAST
             }
             
+            // Patch 100b: True if [peerID] is bound to a MAC currently in the
+            // connection tracker — i.e. the peer has a live BLE ACL on our side.
+            override fun hasLiveBleConnection(peerID: String): Boolean {
+                val liveMacs = connectionManager.getAllConnectedMacs()
+                return connectionManager.addressPeerMap.entries.any {
+                    it.value == peerID && liveMacs.contains(it.key)
+                }
+            }
+
             // Cryptographic operations
             override fun verifySignature(packet: BitchatPacket, peerID: String): Boolean {
                 return securityManager.verifySignature(packet, peerID)
@@ -1274,13 +1283,21 @@ class BluetoothMeshService(
      * Send leave announcement
      */
     private fun sendLeaveAnnouncement() {
+        // Patch 100b: Log a stack trace every time we emit a LEAVE so we can
+        // attribute spurious LEAVE packets observed on peers back to the
+        // exact call path that triggered them. LEAVE is rare in our normal
+        // flow (~1 per session) so the noise is minimal; it stays in until
+        // we have full confidence that no unexpected callers exist.
+        Log.w(TAG, "Patch 100b: sendLeaveAnnouncement() called for myPeerID=$myPeerID",
+            Throwable("LEAVE-broadcast-trace"))
+
         val packet = BitchatPacket(
             type = MessageType.LEAVE.value,
             ttl = MAX_TTL,
             senderID = myPeerID,
             payload = byteArrayOf()
         )
-        
+
         // Sign the packet before broadcasting
         val signedPacket = signPacketBeforeBroadcast(packet)
         connectionManager.broadcastPacket(RoutedPacket(signedPacket))
