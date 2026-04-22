@@ -277,72 +277,49 @@ class BluetoothConnectionManager(
                     Log.e(TAG, "Patch 86: GATT service setup failed or timed out, continuing anyway")
                 }
 
-                // Patch 88/93: Phantom ACL handling.
-                // - Android-hosted games: single-pass check, advertise immediately.
-                //   maxServerConnections=10 + Patch 90 host-side kicked-peer cooldown
-                //   prevent phantoms from blocking the real host subscription.
-                // - iOS-hosted games: poll until the phantom ACL clears before advertising.
-                //   The Tensor G4 BLE controller (Pixel 9 Pro) holds phantom ACL links
-                //   for ~23-27s after a kick. While the phantom is alive, the BLE address
-                //   cannot rotate, so the iOS host keeps seeing the same peripheral UUID
-                //   and eventually accepts a stale phantom didConnect that blocks
-                //   didDiscover for the real rejoin. Waiting for the phantom to die lets
-                //   the BLE address rotate, giving the iOS host a fresh peripheral UUID.
-                //   Combined with the 10s home button cooldown (Patch 93), this poll
-                //   only adds ~13-23s of visible wait after the player taps "Join a Game".
-                if (hostIsAndroid) {
-                    val staleDevices = try {
+                // Patch 101 (replaces Patch 88/93 passive poll): At startup the BLE
+                // controller may report leftover GATT_SERVER ACLs from the previous
+                // session. Patch 88/93 used to *wait* for these to drain naturally
+                // (which on Tensor G2/G4 takes 25s+ and frequently doesn't drain at
+                // all — confirmed by Patch 102 timing out at 2s after every cancel).
+                // We now actively evict each phantom via cancelConnection, awaiting
+                // the server-side STATE_DISCONNECTED callback per peer (Patch 95-style).
+                //
+                // This restores the approach of the original Patch 75 ("Disconnect
+                // all stale GATT connections at startup") that Patch 88 had reverted
+                // on the belief that eviction "doesn't work on Tensor G4." That belief
+                // is contradicted by Patch 76's identical cancelConnection-based
+                // eviction working successfully in the disconnect-time path. If
+                // eviction times out per peer, we proceed anyway — strict no-regression
+                // versus today's "log and proceed" behavior.
+                val staleDevices = try {
+                    bluetoothManager.getConnectedDevices(
+                        android.bluetooth.BluetoothProfile.GATT_SERVER
+                    )
+                } catch (_: Exception) { emptyList() }
+                if (staleDevices.isEmpty()) {
+                    Log.d(TAG, "Patch 101: No stale connections — ready to advertise")
+                } else {
+                    Log.i(TAG, "Patch 101: Evicting ${staleDevices.size} stale server ACL(s) " +
+                            "at startup: " + staleDevices.joinToString { it.address })
+                    for (device in staleDevices) {
+                        val ok = serverManager.disconnectDeviceAndAwait(device, timeoutMs = 500)
+                        Log.d(TAG, "Patch 101: Eviction of ${device.address} " +
+                                if (ok) "confirmed" else "timed out")
+                    }
+                    // Brief settle so the controller can finish releasing slots
+                    // before beginAdvertising() registers a fresh advertising set.
+                    delay(150)
+                    val remaining = try {
                         bluetoothManager.getConnectedDevices(
                             android.bluetooth.BluetoothProfile.GATT_SERVER
                         )
                     } catch (_: Exception) { emptyList() }
-                    if (staleDevices.isEmpty()) {
-                        Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
+                    if (remaining.isNotEmpty()) {
+                        Log.w(TAG, "Patch 101: ${remaining.size} stale connection(s) survived " +
+                                "eviction (${remaining.joinToString { it.address }}) — proceeding")
                     } else {
-                        Log.i(TAG, "Patch 88: ${staleDevices.size} stale connection(s) at startup " +
-                                "(Android host — proceeding): " +
-                                staleDevices.joinToString { it.address })
-                    }
-                } else {
-                    // iOS host: wait for phantom ACL to clear so the BLE address can rotate.
-                    val phantomDeadline = System.currentTimeMillis() + 25_000
-                    var phantomPollCount = 0
-                    while (System.currentTimeMillis() < phantomDeadline) {
-                        val staleDevices = try {
-                            bluetoothManager.getConnectedDevices(
-                                android.bluetooth.BluetoothProfile.GATT_SERVER
-                            )
-                        } catch (_: Exception) { emptyList() }
-
-                        if (staleDevices.isEmpty()) {
-                            if (phantomPollCount == 0) {
-                                Log.d(TAG, "Patch 88: No stale connections — ready to advertise")
-                            } else {
-                                val elapsed = System.currentTimeMillis() - (phantomDeadline - 25_000)
-                                Log.i(TAG, "Patch 88: Phantom ACL cleared after $phantomPollCount polls (${elapsed}ms)")
-                            }
-                            break
-                        }
-
-                        if (phantomPollCount == 0) {
-                            Log.i(TAG, "Patch 88: Waiting for phantom ACL to clear (iOS host): " +
-                                    staleDevices.joinToString { it.address })
-                        }
-                        phantomPollCount++
-                        delay(250)
-                    }
-
-                    if (phantomPollCount > 0) {
-                        val remaining = try {
-                            bluetoothManager.getConnectedDevices(
-                                android.bluetooth.BluetoothProfile.GATT_SERVER
-                            )
-                        } catch (_: Exception) { emptyList() }
-                        if (remaining.isNotEmpty()) {
-                            Log.w(TAG, "Patch 88: Phantom ACL survived 25s deadline: " +
-                                    remaining.joinToString { it.address } +
-                                    " — proceeding anyway")
-                        }
+                        Log.i(TAG, "Patch 101: All stale connections evicted, controller clean")
                     }
                 }
 
