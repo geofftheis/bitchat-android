@@ -509,6 +509,12 @@ class BluetoothConnectionManager(
         return serverManager.awaitPeerDisconnect(address, timeoutMs)
     }
 
+    /** Patch 99: Return every MAC currently tracked as a live BLE connection
+     *  (client and server roles combined). Used by the app layer's end/cancel
+     *  teardown loop to iterate over real BLE links, not the peer-identity
+     *  cache which can miss peers whose announce packet expired. */
+    fun getAllConnectedMacs(): Set<String> = connectionTracker.getConnectedDevices().keys.toSet()
+
     /** Disconnect a device by MAC address directly, bypassing addressPeerMap lookup.
      *  Used when the MAC was captured before a LEAVE packet could clear the mapping.
      *  Patch 95: Suspending — waits for the GATT client/server disconnect callback

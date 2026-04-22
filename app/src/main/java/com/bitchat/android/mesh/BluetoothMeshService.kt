@@ -116,6 +116,9 @@ class BluetoothMeshService(
         return connectionManager.awaitPeerDisconnect(address, timeoutMs)
     }
 
+    /** Patch 99: Return every MAC currently tracked as a live BLE connection. */
+    fun getAllConnectedMacs(): Set<String> = connectionManager.getAllConnectedMacs()
+
     /** Patch 94: Pin power mode out of POWER_SAVER while hosting a game. */
     fun setHostRoleActive(active: Boolean) {
         connectionManager.setHostRoleActive(active)
