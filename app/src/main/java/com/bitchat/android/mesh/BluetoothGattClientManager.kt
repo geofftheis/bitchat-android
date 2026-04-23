@@ -226,8 +226,13 @@ class BluetoothGattClientManager(
                 startScanning()
             }
             
-            // Start RSSI monitoring
-            startRSSIMonitoring()
+            // Patch 106: RSSI monitoring disabled. Half-Wit uses a star topology
+            // with no relaying — connection-quality-based routing decisions
+            // bitchat needs RSSI for don't apply. Each periodic readRemoteRssi()
+            // is an unnecessary GATT operation that adds radio chatter (and
+            // contends with disconnect/CCCD-write traffic during teardown).
+            // The function is preserved for upstream alignment; just not called.
+            // startRSSIMonitoring()
         }
         
         return true
