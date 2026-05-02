@@ -43,6 +43,11 @@ class MeshForegroundService : Service() {
         @Volatile
         private var meshAutoSpawnSuppressed: Boolean = false
 
+        // Host app can set this to override the notification tap target (e.g. point to the
+        // host app's MainActivity instead of Bitchat's).
+        @Volatile
+        var contentIntent: PendingIntent? = null
+
         fun start(context: Context) {
             // Patch 103: A new explicit start() call cancels any prior shutdown gate
             // so the auto-spawn path can run again for this fresh session.
@@ -316,11 +321,13 @@ class MeshForegroundService : Service() {
     }
 
     private fun buildNotification(activePeers: Int): Notification {
-        val openIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
+        val pendingIntent = contentIntent ?: run {
+            val openIntent = Intent(this, MainActivity::class.java)
+            PendingIntent.getActivity(
+                this, 0, openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+            )
+        }
 
         // Action: Quit Bitchat
         val quitIntent = Intent(this, MeshForegroundService::class.java).apply { action = ACTION_QUIT }
