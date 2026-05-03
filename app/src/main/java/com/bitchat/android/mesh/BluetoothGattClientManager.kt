@@ -119,6 +119,12 @@ class BluetoothGattClientManager(
     // ACL is still alive (which causes status 133 errors).
     private val recentlyKickedPeers = mutableMapOf<String, Long>()
 
+    // Peer IDs seen during this game session. Persists through disconnects so that
+    // a reconnecting player whose Samsung rotated its BLE address is recognised and
+    // bypasses the RSSI filter and per-device cooldown (same role as iOS's
+    // knownPeerPeripherals check in didDiscoverPeripheral).
+    private val knownPlayerPeerIds = ConcurrentHashMap.newKeySet<String>()
+
     fun addKickedPeer(peerID: String) {
         recentlyKickedPeers[peerID] = System.currentTimeMillis()
     }
@@ -251,6 +257,7 @@ class BluetoothGattClientManager(
         }
 
         isActive = false
+        knownPlayerPeerIds.clear()
 
         // Stop synchronously so cleanup isn't skipped if connectionScope
         // is cancelled before this coroutine executes.
@@ -527,20 +534,27 @@ class BluetoothGattClientManager(
         // Store RSSI from scan results for later use (especially for server connections)
         connectionTracker.updateScanRSSI(deviceAddress, rssi)
 
+        // Recognize a previously-seen game peer reconnecting after BLE address rotation.
+        // knownPlayerPeerIds persists through disconnects, so when a Samsung device rotates
+        // its random address the peerID (from service data) still matches. Bypass RSSI
+        // filter and cooldown for these peers — they are active game participants.
+        val isKnownPlayer = peerID != null && knownPlayerPeerIds.contains(peerID)
+
         // Power-aware RSSI filtering
-        if (rssi < powerManager.getRSSIThreshold()) {
+        if (rssi < powerManager.getRSSIThreshold() && !isKnownPlayer) {
             Log.d(TAG, "Skipping device $deviceAddress due to weak signal: $rssi < ${powerManager.getRSSIThreshold()}")
             return
         }
-        
+
         // Check if already connected OR already attempting to connect
         if (connectionTracker.isDeviceConnected(deviceAddress)) {
             return
         }
-        
+
         // Check if connection attempt is allowed
         // Patch 43: Bypass cooldown for the reserved (host) peer — join reliability is critical.
-        val isReservedDevice = reservedPeerPrefix.isNotEmpty() && peerID != null && peerID.startsWith(reservedPeerPrefix)
+        // Also bypass for known game players reconnecting after address rotation.
+        val isReservedDevice = (reservedPeerPrefix.isNotEmpty() && peerID != null && peerID.startsWith(reservedPeerPrefix)) || isKnownPlayer
         if (!isReservedDevice && !connectionTracker.isConnectionAttemptAllowed(deviceAddress)) {
             Log.d(TAG, "Connection to $deviceAddress not allowed due to recent attempts")
             return
@@ -574,6 +588,7 @@ class BluetoothGattClientManager(
 
         // Add pending connection and start connection
         if (connectionTracker.addPendingConnection(deviceAddress)) {
+            if (peerID != null) knownPlayerPeerIds.add(peerID)
             connectToDevice(device, rssi, peerID)
         }
     }
