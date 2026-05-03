@@ -192,8 +192,8 @@ class BluetoothConnectionManager(
 
         try {
             // Patch 40: Use role-aware connection limits instead of PowerManager defaults.
-            // Host: 0 client, up to maxServerConnections server.
-            // Player: up to maxClientConnections client, up to maxServerConnections server.
+            // Host: up to maxClientConnections outbound (scans and connects to players), 0 inbound.
+            // Player: 0 outbound, up to maxServerConnections inbound (host connects to them).
             val maxClient = maxClientConnections
             val maxServer = maxServerConnections
             // Patch 50: maxTotalConnections caps the combined limit when set
