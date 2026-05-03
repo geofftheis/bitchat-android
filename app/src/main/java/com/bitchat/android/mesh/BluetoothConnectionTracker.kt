@@ -50,8 +50,7 @@ class BluetoothConnectionTracker(
         val isClient: Boolean = false,
         val connectedAt: Long = System.currentTimeMillis(),
         val peerID: String? = null,
-        val descriptorWriteConfirmed: Boolean = false,  // Patch 40c
-        val attMtu: Int = 185  // Patch 107: negotiated ATT MTU (default = iOS-requested 185)
+        val descriptorWriteConfirmed: Boolean = false  // Patch 40c
     )
     
     /**
@@ -111,18 +110,6 @@ class BluetoothConnectionTracker(
      */
     fun updateDeviceConnection(deviceAddress: String, deviceConn: DeviceConnection) {
         connectedDevices[deviceAddress] = deviceConn
-    }
-
-    /**
-     * Patch 107: Record the negotiated ATT MTU for a server-side connection.
-     * Called from BluetoothGattServerManager.onMtuChanged so the broadcaster
-     * knows the maximum notification payload size for each central.
-     */
-    fun updateDeviceAttMtu(deviceAddress: String, mtu: Int) {
-        connectedDevices[deviceAddress]?.let { existing ->
-            connectedDevices[deviceAddress] = existing.copy(attMtu = mtu)
-            Log.d(TAG, "Patch 107: Updated ATT MTU for $deviceAddress to $mtu")
-        }
     }
     
     /**
