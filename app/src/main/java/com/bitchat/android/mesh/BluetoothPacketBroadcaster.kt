@@ -380,7 +380,7 @@ class BluetoothPacketBroadcaster(
             
             if (serverTarget != null) {
                 Log.d(TAG, "Source Routing: sending directly to first hop (server conn) $firstHop: ${serverTarget.address}")
-                if (notifyDevice(serverTarget, data, gattServer, characteristic)) {
+                if (notifyDeviceChunked(serverTarget, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[serverTarget.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, serverTarget.address, packet.ttl, packet.version, routeInfo)
                     sent = true
@@ -417,7 +417,7 @@ class BluetoothPacketBroadcaster(
             // If found, send directly
             if (targetDevice != null) {
                 Log.d(TAG, "Send packet type ${packet.type} directly to target device for recipient $recipientID: ${targetDevice.address}")
-                if (notifyDevice(targetDevice, data, gattServer, characteristic)) {
+                if (notifyDeviceChunked(targetDevice, data, gattServer, characteristic)) {
                     val toPeer = connectionTracker.addressPeerMap[targetDevice.address]
                     logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, targetDevice.address, packet.ttl, packet.version, routeInfo)
                     return  // Sent, no need to continue
@@ -456,24 +456,24 @@ class BluetoothPacketBroadcaster(
         val hostOnly = hostPeerPrefix.isNotEmpty() && !senderID.startsWith(hostPeerPrefix) && !isDiscoveryPacket && !isOwnMessage
 
         // Send to server connections (devices connected to our GATT server)
-        subscribedDevices.forEach { device ->
+        for (device in subscribedDevices) {
             if (device.address == routed.relayAddress) {
                 Log.d(TAG, "Skipping broadcast to client back to relayer: ${device.address}")
-                return@forEach
+                continue
             }
             if (connectionTracker.addressPeerMap[device.address] == senderID) {
                 Log.d(TAG, "Skipping broadcast to client back to sender: ${device.address}")
-                return@forEach
+                continue
             }
             // Patch 54: non-host traffic only goes to the host
             if (hostOnly) {
                 val toPeer = connectionTracker.addressPeerMap[device.address]
                 if (toPeer == null || !toPeer.startsWith(hostPeerPrefix)) {
                     Log.d(TAG, "Patch 54: Skipping relay of non-host packet to non-host peer: ${device.address}")
-                    return@forEach
+                    continue
                 }
             }
-            val sent = notifyDevice(device, data, gattServer, characteristic)
+            val sent = notifyDeviceChunked(device, data, gattServer, characteristic)
             if (sent) {
                 val toPeer = connectionTracker.addressPeerMap[device.address]
                 logPacketRelay(typeName, senderPeerID, senderNick, incomingPeer, incomingAddr, toPeer, device.address, packet.ttl, packet.version, routeInfo)
@@ -542,6 +542,34 @@ class BluetoothPacketBroadcaster(
         }
     }
 
+
+    /**
+     * Patch 107: Chunk a GATT server notification into MTU-3 sized pieces so
+     * iOS's NotificationStreamAssembler can reconstruct packets larger than the
+     * negotiated ATT MTU. iOS requests MTU=185, giving a 182-byte payload cap.
+     * JoinRequest bitchat packets (~183-203 bytes) exceed this and are silently
+     * truncated by Android's ATT layer without chunking.
+     */
+    private suspend fun notifyDeviceChunked(
+        device: BluetoothDevice,
+        data: ByteArray,
+        gattServer: BluetoothGattServer?,
+        characteristic: BluetoothGattCharacteristic?
+    ): Boolean {
+        val mtu = connectionTracker.getDeviceConnection(device.address)?.attMtu ?: 185
+        val chunkSize = mtu - 3
+        if (data.size <= chunkSize) return notifyDevice(device, data, gattServer, characteristic)
+        var success = false
+        var offset = 0
+        while (offset < data.size) {
+            val end = minOf(offset + chunkSize, data.size)
+            val sent = notifyDevice(device, data.copyOfRange(offset, end), gattServer, characteristic)
+            if (offset == 0) success = sent
+            offset = end
+            if (offset < data.size) delay(20)
+        }
+        return success
+    }
 
     /**
      * Send data to a single device (client->server) - fire-and-forget.

@@ -320,6 +320,15 @@ class BluetoothGattServerManager(
                 }
             }
             
+            override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+                // Patch 107: Track the ATT MTU negotiated by each central so the
+                // broadcaster can chunk GATT server notifications to fit within
+                // the agreed MTU-3 payload limit. iOS negotiates MTU=185, giving
+                // a 182-byte payload cap — below the JoinRequest packet size.
+                Log.i(TAG, "Server: MTU changed for ${device.address} to $mtu")
+                connectionTracker.updateDeviceAttMtu(device.address, mtu)
+            }
+
             override fun onServiceAdded(status: Int, service: BluetoothGattService) {
                 // Guard against callbacks after service shutdown
                 if (!isActive) {
